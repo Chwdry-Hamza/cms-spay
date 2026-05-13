@@ -4,6 +4,7 @@ export type SectionType =
   | "appHeader"
   | "homeHero"
   | "features"
+  | "currencies"
   | "featureGrid"
   | "payment"
   | "transfer"
@@ -12,12 +13,16 @@ export type SectionType =
   | "linkedAccounts"
   | "collaborations"
   | "joinUs"
+  | "customSection"
   | "footer"
   | "bottomNav"
   | "cookieConsent";
 
 export type SectionMeta = {
+  /** Stable identifier used by the iframe & inspectors (matches PreviewSection id). */
   id: string;
+  /** Backend instance id (nanoid). Present when the section was loaded from cms-backend. */
+  instanceId?: string;
   type: SectionType;
   name: string;
   file: string;
@@ -108,11 +113,30 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
         {
           title: "HISTORY",
           desc: "Get a wide range of innovative financial tools for unlimited wealth-building opportunities.",
-          image: "/notification.jpeg",
+          image: "/notifications.jpeg",
           bgStart: "#46F1C5",
           bgEnd: "#004132",
         },
       ],
+    },
+  },
+  {
+    id: "currencies",
+    type: "currencies",
+    name: "Currencies Ticker",
+    file: "currencies.tsx",
+    icon: "trend-up",
+    visible: true,
+    description: "Scrolling crypto/fiat ticker rail.",
+    data: {
+      tickers: [
+        { pair: "ETH/USD", price: "$3,452.12", change: "+1.4%" },
+        { pair: "TRX/USD", price: "$0.32", change: "+2.6%" },
+        { pair: "USDT (TRC20)", price: "$1.00", change: "+0.0%" },
+        { pair: "USDT (ERC20)", price: "$1.00", change: "+0.0%" },
+        { pair: "USDC (ERC20)", price: "$1.00", change: "+0.0%" },
+      ],
+      scrollSeconds: 40,
     },
   },
   {
@@ -124,16 +148,45 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
     visible: true,
     description: "Mosaic of supporting feature highlights.",
     data: {
-      eyebrow: "BUILT FOR EVERY SCENARIO",
-      title: "EVERYTHING YOU NEED",
-      tiles: [
-        { icon: "zap", label: "Instant transfers" },
-        { icon: "lock", label: "Bank-grade security" },
-        { icon: "globe", label: "Global coverage" },
-        { icon: "card", label: "Virtual & physical cards" },
-        { icon: "trend-up", label: "Earn while you hold" },
-        { icon: "puzzle", label: "Open API" },
+      eyebrow: "Your crypto, everyday spending",
+      titleParts: [
+        { text: "PAY WITH ", color: "#FFFFFF" },
+        { text: "CRYPTO", color: "#46F1C5" },
+        { text: " ANYWHERE\nA CARD WORKS.", color: "#FFFFFF" },
       ],
+      send: {
+        label: "Send",
+        title: "Send money in seconds, not days.",
+        body: "Move funds to friends, family, or any wallet — across the city or across the world. Every transfer settles instantly.",
+        badgeText: "+ 50 USDC · 1.2s",
+      },
+      grow: {
+        label: "Grow",
+        statValue: "5.0",
+        statUnit: "% APY",
+        body: "Earn yield on your idle balance, paid out daily. No lockups, no minimums, withdraw anytime.",
+      },
+      spend: {
+        label: "Spend",
+        title: "Tap, swipe, or shop online — with crypto.",
+        cardImage: "/spayFront.png",
+      },
+      split: {
+        title: "Spend crypto like cash, anywhere.",
+        body: "Tap your SPay card at any store or pay online — crypto converts to fiat at checkout, automatically.",
+        amountText: "$37.42 each",
+      },
+      business: {
+        title: "For businesses, get paid in crypto.",
+        body: "Online checkouts, in-store payments, and crypto invoices — with same-day payouts to your wallet or bank.",
+        pills: ["Online checkout", "In-store POS", "Crypto invoicing"],
+      },
+      protect: {
+        label: "Protect",
+        title: "Your funds, fully protected.",
+        body: "Multi-sig cold storage on every wallet. Biometric login on every device. 24/7 anomaly detection — your crypto stays yours, always.",
+        pills: ["Multi-sig vault", "Biometric login", "SOC 2 Type II"],
+      },
     },
   },
   {
@@ -214,7 +267,6 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
       subtitle:
         "Purchase, spend, sell, and hold cryptocurrencies, all from the convenience of your device. Delve into the world of digital currencies effortlessly.",
       mockupImage: "/tabletMobile.png",
-      tickers: ["BTC", "ETH", "USDT", "USDC", "SOL", "ADA", "DOGE"],
     },
   },
   {

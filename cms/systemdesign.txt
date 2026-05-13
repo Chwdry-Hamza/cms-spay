@@ -1,0 +1,712 @@
+================================================================================
+                SPAY CMS — BACKEND SYSTEM DESIGN
+                Stack: Node.js + Express + MongoDB (Mongoose)
+================================================================================
+
+TABLE OF CONTENTS
+  1. Overview & Goals
+  2. High-Level Architecture
+  3. Technology Stack
+  4. Project / Folder Structure
+  5. Configuration & Environment
+  6. Database Design (MongoDB Collections)
+  7. Authentication & Authorization (RBAC)
+  8. REST API Surface (per CMS module)
+  9. Request Lifecycle & Middleware
+ 10. Media / File Upload Strategy
+ 11. SEO, Sitemap & Publishing Pipeline
+ 12. Analytics & Tracking
+ 13. Real-Time / Webhooks / Integrations
+ 14. Caching, Performance & Scaling
+ 15. Security Controls
+ 16. Logging, Monitoring, Error Handling
+ 17. Testing Strategy
+ 18. Deployment & DevOps
+ 19. Frontend Integration Contract
+ 20. Roadmap / Phased Build Plan
+
+
+--------------------------------------------------------------------------------
+1. OVERVIEW & GOALS
+--------------------------------------------------------------------------------
+The frontend (this `cms` Next.js app) is a visual CMS for the Spay landing
+website (`spay-website`). It exposes the following modules in the UI:
+
+  - Dashboard          (KPIs, recent activity)
+  - Builder            (drag-and-drop landing page composition)
+  - Sections           (manage detected/registered landing-page sections)
+  - Media Library      (image/asset uploads)
+  - Users              (workspace members, roles, invites)
+  - Analytics          (search performance, traffic, section engagement)
+  - SEO Settings       (metadata, robots.txt, schema, OG, sitemap)
+  - General Settings   (workspace info, integrations, danger zone)
+
+The backend must:
+  - Persist all CMS state (sections, pages, media metadata, users, settings).
+  - Authenticate users and enforce role-based permissions.
+  - Serve the published landing-page content to the public spay-website.
+  - Ingest analytics events and surface aggregated metrics.
+  - Provide a clean, versioned REST API consumed by the Next.js CMS.
+
+Non-goals:
+  - We are NOT rebuilding the public marketing site itself; the backend only
+    publishes structured content the marketing site reads.
+  - No multi-tenant SaaS layer in v1 — a single workspace is assumed, but the
+    schema reserves a `workspaceId` field for future multi-tenancy.
+
+
+--------------------------------------------------------------------------------
+2. HIGH-LEVEL ARCHITECTURE
+--------------------------------------------------------------------------------
+
+   +-------------------+        HTTPS / JSON         +----------------------+
+   |  Next.js CMS UI   |  <----------------------->  |  Express API Server  |
+   |  (this `cms/`)    |    /api/v1/*  (Bearer JWT)  |  (Node 20+, TS)      |
+   +-------------------+                              +----------+-----------+
+                                                                 |
+                                                                 | Mongoose
+                                                                 v
+                                                       +------------------+
+                                                       |    MongoDB       |
+                                                       | (replica set or  |
+                                                       |   Atlas cluster) |
+                                                       +------------------+
+                                                                 ^
+                                                                 |
+   +-------------------+      public read API       +------------+---------+
+   |  spay-website     |  <----------------------->  |  Express (public)   |
+   |  (Next.js public) |   /public/v1/content/*     |  read-only handlers  |
+   +-------------------+                              +----------------------+
+
+Side services (decoupled, run as separate workers or queues):
+
+   +----------------+   +-----------------+   +---------------------+
+   | Media Worker   |   | Analytics       |   | Webhooks / Email    |
+   | (Sharp, S3 up) |   | Aggregator      |   | (BullMQ + Redis)    |
+   +----------------+   +-----------------+   +---------------------+
+
+The API is split into three logical surfaces, all served by one Express app:
+  /api/v1/admin/*    -> CMS-authenticated endpoints (admin UI)
+  /api/v1/public/*   -> Read-only, cached, consumed by spay-website
+  /api/v1/auth/*     -> Login, refresh, invite-accept, password reset
+
+
+--------------------------------------------------------------------------------
+3. TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+  Runtime          Node.js 20 LTS, TypeScript 5
+  Framework        Express 4 (or 5 once stable)
+  ODM              Mongoose 8
+  Validation       Zod (request body / params / query) via a `validate()` middleware
+  Auth             JSON Web Tokens (access + refresh), Argon2id password hashing
+  File Storage     S3-compatible (AWS S3 or Cloudflare R2). Local disk in dev only.
+  Image Pipeline   Sharp (resize, webp/avif conversion, blurhash)
+  Queue / Jobs     BullMQ on Redis (image processing, email, sitemap rebuilds)
+  Cache            Redis (session blacklist, hot reads, rate-limit counters)
+  Realtime (opt.)  Socket.IO for collaborative builder updates (Phase 2)
+  Logging          Pino + pino-http; ship to Logtail / Loki / CloudWatch
+  Errors           Sentry
+  Testing          Vitest + Supertest; mongodb-memory-server for integration tests
+  Docs             OpenAPI 3.1 generated from Zod schemas (zod-openapi)
+  Containers       Docker (multi-stage), docker-compose for local dev
+
+
+--------------------------------------------------------------------------------
+4. PROJECT / FOLDER STRUCTURE
+--------------------------------------------------------------------------------
+  cms-backend/
+    src/
+      app.ts                 # Express app composition
+      server.ts              # HTTP bootstrap, graceful shutdown
+      config/
+        env.ts               # Zod-validated env config
+        db.ts                # Mongoose connection
+        redis.ts
+        logger.ts
+      middleware/
+        auth.ts              # JWT verify + attach req.user
+        rbac.ts              # requireRole('admin'|'editor'|'author'|'viewer')
+        validate.ts          # Zod schema -> 400 on parse error
+        rateLimit.ts
+        errorHandler.ts      # Central error -> JSON envelope
+        requestId.ts
+        notFound.ts
+      modules/
+        auth/
+          auth.routes.ts
+          auth.controller.ts
+          auth.service.ts
+          auth.schemas.ts    # Zod
+        users/
+        sections/
+        pages/               # Landing page composition (builder output)
+        media/
+        analytics/
+        seo/
+        settings/
+        integrations/
+        webhooks/
+        public/              # Public read endpoints for spay-website
+      models/                # Mongoose schemas (one file per collection)
+      jobs/                  # BullMQ workers
+      utils/
+      types/                 # shared TS types & DTOs
+    test/
+    openapi/
+    Dockerfile
+    docker-compose.yml
+    package.json
+    tsconfig.json
+    .env.example
+
+
+--------------------------------------------------------------------------------
+5. CONFIGURATION & ENVIRONMENT
+--------------------------------------------------------------------------------
+Use a single typed `config` object loaded from `process.env` and validated by
+Zod at boot; the server refuses to start on missing/invalid values.
+
+  NODE_ENV               development | production | test
+  PORT                   4000
+  API_BASE_URL           http://localhost:4000
+  CMS_ORIGIN             http://localhost:3000     # for CORS allowlist
+  PUBLIC_SITE_ORIGIN     https://spay.com
+  MONGO_URI              mongodb://localhost:27017/spay_cms
+  REDIS_URL              redis://localhost:6379
+  JWT_ACCESS_SECRET      <32+ byte random>
+  JWT_REFRESH_SECRET     <32+ byte random>
+  JWT_ACCESS_TTL         15m
+  JWT_REFRESH_TTL        30d
+  ARGON2_MEMORY_KIB      19456
+  S3_ENDPOINT            https://...
+  S3_BUCKET              spay-cms-media
+  S3_REGION              auto
+  S3_ACCESS_KEY_ID       ...
+  S3_SECRET_ACCESS_KEY   ...
+  MAIL_FROM              no-reply@spay.com
+  SMTP_URL               smtp://...
+  SENTRY_DSN             https://...
+  LOG_LEVEL              info
+
+
+--------------------------------------------------------------------------------
+6. DATABASE DESIGN (MongoDB Collections)
+--------------------------------------------------------------------------------
+All documents include: `_id`, `createdAt`, `updatedAt`, and `workspaceId` (for
+forward-compat). Soft-delete with `deletedAt` where appropriate.
+
+6.1  users
+  {
+    _id, workspaceId,
+    name, email (unique, indexed), emailVerifiedAt,
+    passwordHash,           // argon2id, null for SSO-only accounts
+    role,                   // 'owner' | 'editor' | 'author' | 'viewer'
+    avatarUrl,
+    status,                 // 'invited' | 'active' | 'suspended'
+    lastActiveAt,
+    invite: { token, invitedBy, expiresAt } | null,
+    mfa:    { enabled, secret, recoveryCodes[] } | null,
+    createdAt, updatedAt
+  }
+  Indexes: { email: 1 } unique; { workspaceId: 1, role: 1 }; { status: 1 }
+
+6.2  refreshTokens
+  { _id, userId, tokenHash, userAgent, ip, expiresAt, revokedAt }
+  Indexes: { userId: 1, expiresAt: 1 }; TTL on expiresAt.
+
+6.3  sections          (reusable building blocks; mirrors the Builder UI)
+  {
+    _id, workspaceId,
+    key,                    // stable slug, e.g. 'homeHero'
+    name,                   // 'Home Hero'
+    type,                   // 'homeHero' | 'features' | 'payment' | ... | 'footer'
+    icon,                   // icon name string used by UI
+    file,                   // path in spay-website source for reference
+    locked: Boolean,        // protected from deletion in UI
+    schemaVersion,          // for migrating older `content` blobs
+    defaultContent: Mixed,  // JSON document the UI knows how to render/edit
+    previewImage,
+    createdAt, updatedAt
+  }
+  Indexes: { workspaceId: 1, key: 1 } unique.
+
+6.4  pages             (a composed landing page = ordered list of section instances)
+  {
+    _id, workspaceId,
+    slug,                   // '/', '/about', etc.
+    title,
+    status,                 // 'draft' | 'scheduled' | 'published' | 'archived'
+    publishedAt, scheduledAt,
+    seo: { title, description, canonical, ogImage, noindex, jsonLd[] },
+    layout: [               // ordered section instances
+      { instanceId, sectionId, overrides: Mixed, hidden: Boolean }
+    ],
+    currentRevisionId,
+    createdBy, updatedBy,
+    createdAt, updatedAt
+  }
+  Indexes: { workspaceId: 1, slug: 1 } unique; { status: 1, publishedAt: -1 }.
+
+6.5  pageRevisions      (immutable history; supports rollback + audit)
+  {
+    _id, pageId, version,
+    snapshot: Mixed,        // full page doc at the time
+    note, authorId,
+    createdAt
+  }
+  Indexes: { pageId: 1, version: -1 }.
+
+6.6  media
+  {
+    _id, workspaceId,
+    name, mime, sizeBytes,
+    width, height, durationSec,
+    storage: { provider: 's3', bucket, key, url },
+    variants: [             // produced by image worker
+      { label: 'thumb'|'sm'|'md'|'lg'|'og', width, height, url, mime }
+    ],
+    blurhash, dominantColor,
+    alt,                    // accessibility / auto-suggested
+    tags: [String],
+    uploadedBy,
+    createdAt
+  }
+  Indexes: { workspaceId: 1, createdAt: -1 }; text index on { name, alt, tags }.
+
+6.7  settings           (singleton per workspace — workspace + integrations)
+  {
+    _id, workspaceId (unique),
+    workspace: { name, slug, primaryDomain, timezone },
+    branding:  { logoMediaId, faviconMediaId, accent },
+    integrations: {
+      gsc:      { connected, propertyId, refreshTokenEnc, syncIntervalMin },
+      ga4:      { connected, propertyId, measurementId },
+      ahrefs:   { connected, apiKeyEnc },
+      slack:    { connected, webhookUrlEnc, channel },
+      zapier:   { connected, activeZaps },
+      webhooks: [{ id, url, events[], secretEnc, enabled }]
+    },
+    danger: { deletionRequestedAt: Date | null }
+  }
+
+6.8  seoSettings        (separate doc; large + edited independently)
+  {
+    _id, workspaceId (unique),
+    titleTemplate, defaultDescription, canonicalDomain, defaultLanguage,
+    flags: { allowIndexing, autoOG, jsonLd, autoSitemap },
+    robotsTxt,              // raw text (rendered at /robots.txt)
+    perSection: [           // anchor + schema map
+      { sectionKey, anchor, schemaType, enabled }
+    ]
+  }
+
+6.9  analyticsEvents    (write-heavy, append-only)
+  {
+    _id, workspaceId,
+    type,                   // 'pageview' | 'sectionview' | 'click' | 'conversion'
+    pageSlug, sectionKey,
+    visitor: { anonId, country, device, referrer, utm:{...} },
+    ts: Date
+  }
+  Indexes: { workspaceId: 1, ts: -1 }; { type: 1, ts: -1 }; { sectionKey: 1, ts: -1 }.
+  Consider time-series collection (Mongo 6+) keyed on `ts`.
+
+6.10 analyticsDaily     (pre-aggregated rollups for fast dashboards)
+  {
+    _id, workspaceId, date (YYYY-MM-DD),
+    clicks, impressions, ctr, avgPosition,
+    bySection: [{ sectionKey, views, impressions, ctr, scrollPct }],
+    bySource:  [{ source, visits }],
+    byDevice:  { desktop, mobile, tablet }
+  }
+  Indexes: { workspaceId: 1, date: -1 } unique.
+
+6.11 auditLogs
+  {
+    _id, workspaceId, actorId,
+    action,                 // 'page.publish', 'user.invite', 'settings.update'
+    target: { type, id },
+    diff: Mixed,            // small JSON patch
+    ip, userAgent,
+    createdAt
+  }
+  Indexes: { workspaceId: 1, createdAt: -1 }; { actorId: 1 }.
+
+6.12 jobs               (managed by BullMQ in Redis, mirrored here for history)
+  { _id, name, status, attempts, payload, error, startedAt, finishedAt }
+
+
+--------------------------------------------------------------------------------
+7. AUTHENTICATION & AUTHORIZATION (RBAC)
+--------------------------------------------------------------------------------
+Auth flow:
+  1. POST /auth/login with email+password -> verify argon2id hash.
+  2. Issue short-lived access JWT (15m) + long-lived refresh token (30d).
+     - Refresh stored hashed in `refreshTokens`. Sent as httpOnly, Secure,
+       SameSite=Strict cookie. Access token returned in JSON for the CMS to
+       attach as `Authorization: Bearer ...`.
+  3. POST /auth/refresh rotates the refresh token (single-use rotation).
+  4. POST /auth/logout revokes the current refresh token.
+  5. Optional MFA (TOTP) gate between login and token issuance.
+  6. Invites: POST /users/invite emails a signed token; recipient finishes
+     onboarding at POST /auth/accept-invite.
+
+Roles & permissions (enforced via `requireRole` and a permission matrix):
+
+  Capability                  owner   editor   author   viewer
+  -----------------------------------------------------------
+  Manage workspace settings     ✔
+  Manage integrations           ✔
+  Invite / remove users         ✔
+  Edit users' roles             ✔
+  Create / edit pages           ✔       ✔        ✔ (own)
+  Publish pages                 ✔       ✔
+  Upload media                  ✔       ✔        ✔
+  View analytics                ✔       ✔        ✔        ✔
+  Edit SEO settings             ✔       ✔
+  Delete workspace              ✔ (with re-auth)
+
+Permission checks live in `middleware/rbac.ts` and can be combined per route:
+  router.post('/pages/:id/publish', requireAuth, requireRole('owner','editor'), ...)
+
+
+--------------------------------------------------------------------------------
+8. REST API SURFACE
+--------------------------------------------------------------------------------
+All routes are versioned under `/api/v1`. Response envelope:
+
+  Success: { ok: true, data: <payload>, meta?: { ... } }
+  Error:   { ok: false, error: { code, message, details? }, requestId }
+
+8.1  Auth
+  POST   /auth/login
+  POST   /auth/refresh
+  POST   /auth/logout
+  POST   /auth/forgot-password
+  POST   /auth/reset-password
+  POST   /auth/accept-invite
+  GET    /auth/me
+
+8.2  Users (workspace members)
+  GET    /users                         list, supports ?role, ?status, ?q, pagination
+  POST   /users/invite                  body: { email, role }
+  GET    /users/:id
+  PATCH  /users/:id                     name, role, status
+  DELETE /users/:id                     soft-delete (owner only)
+  POST   /users/:id/resend-invite
+
+8.3  Sections (catalogue of building blocks)
+  GET    /sections
+  POST   /sections
+  GET    /sections/:id
+  PATCH  /sections/:id
+  DELETE /sections/:id                  blocked when locked === true
+
+8.4  Pages (Builder output)
+  GET    /pages                         filterable by status
+  POST   /pages
+  GET    /pages/:id
+  PATCH  /pages/:id                     creates a new revision under the hood
+  DELETE /pages/:id
+  POST   /pages/:id/publish             snapshots -> sets status=published
+  POST   /pages/:id/schedule            body: { publishAt }
+  POST   /pages/:id/duplicate
+  GET    /pages/:id/revisions
+  POST   /pages/:id/revisions/:rev/restore
+  POST   /pages/:id/preview-token       signed short-lived link for preview
+
+8.5  Media
+  POST   /media/sign-upload             returns S3 pre-signed PUT URL + media doc id
+  POST   /media/:id/finalize            client confirms upload; enqueue processing
+  GET    /media                         ?q, ?tag, pagination
+  GET    /media/:id
+  PATCH  /media/:id                     alt, tags, name
+  DELETE /media/:id
+
+8.6  Analytics
+  GET    /analytics/summary             ?from, ?to     -> KPI cards
+  GET    /analytics/timeseries          ?metric=clicks|impressions|ctr|position
+  GET    /analytics/sections            per-section engagement table
+  GET    /analytics/sources             traffic source breakdown
+  GET    /analytics/devices             device split
+  POST   /analytics/ingest              public, signed; records pageview/section view
+
+8.7  SEO settings
+  GET    /seo
+  PATCH  /seo                           upsert workspace-wide SEO doc
+  GET    /seo/robots                    returns plain text (also exposed publicly)
+  POST   /seo/sitemap/rebuild           enqueues sitemap regeneration
+
+8.8  Settings & Integrations
+  GET    /settings
+  PATCH  /settings                      workspace + branding
+  GET    /settings/integrations
+  PATCH  /settings/integrations/:provider
+  POST   /settings/integrations/:provider/test
+  POST   /settings/danger/delete-workspace   requires re-auth + confirmation phrase
+
+8.9  Webhooks (outgoing)
+  GET    /webhooks
+  POST   /webhooks
+  PATCH  /webhooks/:id
+  DELETE /webhooks/:id
+  POST   /webhooks/:id/redeliver/:eventId
+
+8.10 Public (consumed by spay-website, cacheable)
+  GET    /public/pages/:slug            published layout + resolved section content
+  GET    /public/sitemap.xml
+  GET    /public/robots.txt
+  POST   /public/track                  anonymous analytics ingest (rate-limited)
+
+
+--------------------------------------------------------------------------------
+9. REQUEST LIFECYCLE & MIDDLEWARE
+--------------------------------------------------------------------------------
+Order of middleware on the main Express app:
+
+  1. helmet()                            sane HTTP security headers
+  2. cors({ origin: allowlist })         CMS_ORIGIN + PUBLIC_SITE_ORIGIN only
+  3. requestId()                         X-Request-Id propagation
+  4. pino-http                           structured access logs
+  5. express.json({ limit: '1mb' })      strict body size
+  6. cookieParser()
+  7. rateLimit                           Redis-backed, scoped per route group
+  8. routes('/api/v1/auth', ...)
+     routes('/api/v1/admin/*', requireAuth, ...)
+     routes('/api/v1/public/*', cacheMiddleware, ...)
+  9. notFound()
+ 10. errorHandler()                      maps known errors to envelope
+
+
+--------------------------------------------------------------------------------
+10. MEDIA / FILE UPLOAD STRATEGY
+--------------------------------------------------------------------------------
+Avoid streaming uploads through the API server. Instead:
+
+  1. Client (CMS) calls POST /media/sign-upload with { name, mime, size }.
+  2. Server validates mime + size against a whitelist (PNG, JPG, SVG, WEBP,
+     AVIF, MP4 for v2), creates a `media` doc with status='pending', and
+     returns a presigned S3 PUT URL + storage key.
+  3. Browser PUTs the file directly to S3.
+  4. Client calls POST /media/:id/finalize.
+  5. Server enqueues a BullMQ `media.process` job:
+       - Download from S3 -> Sharp pipeline.
+       - Generate variants: thumb(256), sm(640), md(1024), lg(1920), og(1200x630).
+       - Convert originals to webp + avif when feasible.
+       - Compute blurhash + dominant color.
+       - Suggest alt text via a pluggable provider (optional).
+       - Write back variants[] and set status='ready'.
+  6. CMS polls the doc (or subscribes via SSE / socket) until ready.
+
+Constraints (server-enforced):
+  - Max 25MB per file (matches the UI hint).
+  - Reject SVGs with embedded script tags (sanitize via DOMPurify-server).
+  - Per-workspace storage quota tracked in `settings.storageUsedBytes`.
+
+
+--------------------------------------------------------------------------------
+11. SEO, SITEMAP & PUBLISHING PIPELINE
+--------------------------------------------------------------------------------
+Publishing a page triggers (in order, idempotent):
+
+  1. Validate page (Zod), then snapshot into `pageRevisions`.
+  2. Flip `pages.status='published'`, set `publishedAt`.
+  3. Bust public read cache for the slug.
+  4. Enqueue `sitemap.rebuild`:
+       - Build /sitemap.xml from all published pages.
+       - Upload to S3 / serve from /public/sitemap.xml with proper Cache-Control.
+       - If autoSitemap flag is on, ping Google & Bing.
+  5. Enqueue `webhook.dispatch` for `page.published` event.
+
+Robots.txt is generated from `seoSettings.robotsTxt` at request time and
+cached for 5 minutes.
+
+JSON-LD: derived per-section using `seoSettings.perSection` mapping; injected
+into the public page payload returned by /public/pages/:slug so the marketing
+site can render it server-side.
+
+
+--------------------------------------------------------------------------------
+12. ANALYTICS & TRACKING
+--------------------------------------------------------------------------------
+Two paths:
+
+  A) Self-hosted (default)
+     - The public spay-website POSTs to /public/track with a small payload:
+         { type, pageSlug, sectionKey?, anonId, referrer, utm, ua }
+     - Server enriches with geo + device parse, writes to `analyticsEvents`.
+     - A nightly BullMQ job (`analytics.rollup`) builds `analyticsDaily`.
+     - Dashboard endpoints read mostly from `analyticsDaily` for speed,
+       falling back to `analyticsEvents` for ad-hoc date ranges.
+
+  B) External (GSC / GA4)
+     - Per-integration sync workers pull metrics on a schedule (every 6h for
+       GSC by default), upsert into `analyticsDaily` under separate metric
+       buckets so self-hosted and external data don't collide.
+
+PII: never store raw IPs; only a salted hash + coarse geo (country/region).
+
+
+--------------------------------------------------------------------------------
+13. REAL-TIME / WEBHOOKS / INTEGRATIONS
+--------------------------------------------------------------------------------
+Outgoing webhooks (settings.integrations.webhooks):
+  - Events: page.published, page.scheduled, media.processed, user.invited,
+    seo.sitemap.rebuilt, settings.changed.
+  - Delivery: signed HMAC-SHA256 in `X-Spay-Signature` header.
+  - Retries: 5 attempts, exponential backoff via BullMQ; dead-letter queue.
+  - Redelivery endpoint for the UI.
+
+Realtime (Phase 2, optional):
+  - Socket.IO namespace `/builder` so multiple editors see live updates.
+  - Use a Mongo change stream on `pages` to fan out events to connected
+    sockets scoped by `pageId`.
+
+
+--------------------------------------------------------------------------------
+14. CACHING, PERFORMANCE & SCALING
+--------------------------------------------------------------------------------
+  - Public read endpoints (/public/pages/:slug, sitemap, robots) cached in
+    Redis with explicit invalidation on publish; TTL fallback 5 min.
+  - HTTP Cache-Control: public, s-maxage=300, stale-while-revalidate=60.
+  - Hot dashboard endpoints memoized per (workspaceId, dateRange) for 60s.
+  - Mongo: lean() reads in list endpoints; project only needed fields.
+  - Pagination is cursor-based on `_id` for collections > 10k rows
+    (analyticsEvents, mediaLibrary). Offset paging allowed elsewhere.
+  - Stateless API => horizontally scalable behind a load balancer.
+  - Long-running work (image processing, sitemap rebuilds, webhook delivery,
+    rollups) runs in separate worker processes against the same Redis queue.
+
+
+--------------------------------------------------------------------------------
+15. SECURITY CONTROLS
+--------------------------------------------------------------------------------
+  - Argon2id password hashing; pepper from env (never in DB).
+  - JWT secrets rotated via dual-key support (kid in header).
+  - All bodies validated with Zod; reject unknown keys (strict()).
+  - Helmet defaults + a strict CSP for any HTML responses.
+  - CORS allowlist; credentials only for the CMS origin.
+  - Rate limits:
+      auth/login              5/min per IP + per email
+      public/track            60/min per anonId
+      media/sign-upload       30/min per user
+      generic admin endpoints 600/min per user
+  - Encrypt third-party tokens at rest with AES-256-GCM, key from env/KMS.
+  - Audit log every state-changing admin action.
+  - Re-authentication required for destructive operations (delete workspace,
+    rotate integration credentials).
+  - SVG/HTML inputs sanitized; no eval/Function on user input.
+  - Mongo queries always parameterized; no string concatenation of selectors.
+
+
+--------------------------------------------------------------------------------
+16. LOGGING, MONITORING, ERROR HANDLING
+--------------------------------------------------------------------------------
+  - Structured JSON logs (pino). Fields: requestId, userId, route, status, ms.
+  - Sentry captures unhandled errors + Mongo / Redis client errors.
+  - Health checks:
+       GET /healthz   liveness (no deps)
+       GET /readyz    readiness (pings Mongo + Redis)
+  - Metrics endpoint /metrics (Prometheus) — request count, latency p50/p95,
+    queue depth, Mongo op counts.
+  - Central errorHandler maps:
+       ZodError              -> 400 VALIDATION_ERROR
+       Mongoose ValidationError -> 400
+       AuthError             -> 401
+       ForbiddenError        -> 403
+       NotFoundError         -> 404
+       ConflictError         -> 409
+       RateLimitError        -> 429
+       unknown               -> 500 (no stack trace to client)
+
+
+--------------------------------------------------------------------------------
+17. TESTING STRATEGY
+--------------------------------------------------------------------------------
+  - Unit tests for services + zod schemas (Vitest).
+  - Integration tests for each route using Supertest + mongodb-memory-server;
+    one in-memory Mongo per test file for isolation.
+  - Contract tests: generate OpenAPI from Zod, run schemathesis in CI.
+  - Auth + RBAC tests are non-negotiable for every protected route.
+  - Load tests (k6) for /public/pages/:slug and /public/track before launch.
+
+
+--------------------------------------------------------------------------------
+18. DEPLOYMENT & DEVOPS
+--------------------------------------------------------------------------------
+  Local:
+    docker-compose up   # api, mongo, redis, mailhog, minio (S3 stand-in)
+
+  CI (GitHub Actions):
+    - install -> typecheck -> lint -> test -> build
+    - On main: build & push Docker image to registry
+    - Deploy via Render / Fly.io / ECS / Kubernetes (any will do)
+
+  Image: Node 20 alpine, multi-stage build, non-root user, healthcheck.
+  Secrets: pulled from the platform's secret manager, never baked into image.
+  Migrations: Mongoose schemas + a `migrate-mongo` directory for data shape
+              migrations (e.g. `sections.schemaVersion` bumps).
+
+  Backups:
+    - MongoDB daily snapshots, 30-day retention; point-in-time on Atlas.
+    - S3 versioning enabled on the media bucket.
+
+
+--------------------------------------------------------------------------------
+19. FRONTEND INTEGRATION CONTRACT
+--------------------------------------------------------------------------------
+The Next.js CMS will consume the API from a thin client (e.g. `lib/api.ts`):
+
+  - Reads use Next.js `fetch()` with `{ cache: 'no-store' }` inside the admin
+    UI, and `revalidate: 60` for dashboards.
+  - Mutations go through a typed client that includes the Bearer token from
+    an auth context. 401 triggers a refresh flow, then retries once.
+  - All DTOs are shared between CMS and backend via a `@spay/contracts`
+    package (or duplicated TS types in the simplest setup).
+  - The public spay-website fetches /public/pages/:slug at build time
+    (ISR-friendly) and again on revalidate to render the published layout.
+
+UI → API mapping (one entry per major UI view):
+
+  views/DashboardView      -> GET /analytics/summary, GET /pages?status=published&limit=5
+  views/BuilderView        -> GET/PATCH /pages/:id, GET /sections, POST /pages/:id/publish
+  views/SectionsView       -> GET/POST/PATCH/DELETE /sections
+  views/MediaView + Modal  -> POST /media/sign-upload, POST /media/:id/finalize, GET /media
+  views/UsersView          -> GET /users, POST /users/invite, PATCH /users/:id
+  views/AnalyticsView      -> GET /analytics/timeseries, /sections, /sources, /devices
+  views/SeoSettingsView    -> GET/PATCH /seo
+  views/SettingsView       -> GET/PATCH /settings, PATCH /settings/integrations/:provider
+
+
+--------------------------------------------------------------------------------
+20. ROADMAP / PHASED BUILD PLAN
+--------------------------------------------------------------------------------
+Phase 1 — Foundations (week 1–2)
+  - Project skeleton, env config, Mongo + Redis wiring.
+  - Auth (login/refresh/logout), users CRUD, RBAC middleware.
+  - Sections + Pages CRUD with revisions.
+  - Settings + SEO settings singletons.
+  - Public read endpoint /public/pages/:slug.
+
+Phase 2 — Media & Publishing (week 3)
+  - Pre-signed S3 uploads, image processing worker, media library.
+  - Page publish pipeline, sitemap + robots generators.
+  - Outgoing webhooks with retries.
+
+Phase 3 — Analytics (week 4)
+  - /public/track ingest, geo/device enrichment.
+  - Daily rollup worker, dashboard endpoints.
+  - GSC + GA4 sync workers (optional, behind integration toggles).
+
+Phase 4 — Hardening (week 5)
+  - Audit log surface in the UI, MFA, rate-limit tuning.
+  - OpenAPI spec published, schemathesis in CI.
+  - Load testing, observability dashboards.
+
+Phase 5 — Collaboration (later)
+  - Socket.IO live builder, presence indicators, optimistic merges.
+  - Multi-tenant workspace switching using the reserved `workspaceId` field.
+
+================================================================================
+END OF SYSTEM DESIGN
+================================================================================

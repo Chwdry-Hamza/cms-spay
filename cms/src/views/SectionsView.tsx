@@ -19,6 +19,7 @@ const CATEGORY_BY_TYPE: Record<string, Filter> = {
   appHeader: "system",
   homeHero: "hero",
   features: "content",
+  currencies: "content",
   featureGrid: "content",
   payment: "content",
   transfer: "content",

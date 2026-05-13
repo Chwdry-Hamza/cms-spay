@@ -312,7 +312,7 @@ export default function DashboardView() {
               "spayFront.png",
               "paymentMobile.png",
               "crypto.jpeg",
-              "notification.jpeg",
+              "notifications.jpeg",
               "transactions.jpeg",
             ].map((name) => (
               <div

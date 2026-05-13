@@ -10,9 +10,9 @@ export type Viewport = "desktop" | "tablet" | "mobile";
 // frontend's responsive breakpoints think they're seeing a real device.
 // We then scale the rendered output to fit the available canvas.
 const VIEWPORT_WIDTH: Record<Viewport, number> = {
-  desktop: 1280,
-  tablet: 820,
-  mobile: 540,
+  desktop: 1100,
+  tablet: 910,
+  mobile: 580,
 };
 
 // Maximum scale per viewport. Each viewport renders a different device-sized
@@ -20,7 +20,7 @@ const VIEWPORT_WIDTH: Record<Viewport, number> = {
 // blown up — desktop especially benefits from a lower cap so on first load it
 // fits inside the canvas instead of overflowing.
 const MAX_SCALE: Record<Viewport, number> = {
-  desktop: 0.5,
+  desktop: 0.7,
   tablet: 0.9,
   mobile: 0.55,
 };
@@ -163,6 +163,18 @@ export const LivePreview = React.forwardRef<
     return () => window.removeEventListener("message", onMessage);
   }, [onReady, onSectionClicked]);
 
+  // Build the layout payload — instanceId + sectionKey for every section so
+  // the iframe's DynamicPage can render dynamically.
+  const buildLayout = React.useCallback(
+    () =>
+      sections.map((s) => ({
+        instanceId: s.id,
+        sectionKey: s.type,
+        name: s.name,
+      })),
+    [sections],
+  );
+
   // On ready, push the entire current state.
   React.useEffect(() => {
     if (!ready) return;
@@ -174,11 +186,23 @@ export const LivePreview = React.forwardRef<
     }
     send({
       type: "PREVIEW_INIT",
-      payload: { sections: data, visibility, selectedId },
+      payload: { sections: data, visibility, selectedId, layout: buildLayout() },
     });
     // We intentionally only re-init on `ready` flipping true; subsequent updates use PATCH.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  // Keep the iframe's layout in sync as sections are added, removed, or
+  // reordered. The home page renders dynamically from this list.
+  const layoutKey = React.useMemo(
+    () => sections.map((s) => `${s.id}:${s.type}`).join("|"),
+    [sections],
+  );
+  React.useEffect(() => {
+    if (!ready) return;
+    send({ type: "PREVIEW_LAYOUT", payload: { layout: buildLayout() } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, layoutKey]);
 
   // Selection sync: tell the iframe to highlight & scroll to the new selected section.
   React.useEffect(() => {

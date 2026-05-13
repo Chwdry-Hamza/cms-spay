@@ -14,6 +14,7 @@ const NAV_PRIMARY: NavItem[] = [
 ];
 
 const NAV_SECONDARY: NavItem[] = [
+  
   { id: "seo", label: "SEO Settings", href: "/seo-settings", icon: "globe" },
   { id: "analytics", label: "Analytics", href: "/analytics", icon: "analytics" },
   { id: "users", label: "Users", href: "/users", icon: "users", count: 8 },
@@ -40,6 +41,9 @@ function NavGroup({
   pathname: string;
   showLabels: boolean;
 }) {
+  // Hide the whole group (including its header) when there are no items —
+  // otherwise the "ADMIN" label still renders above an empty space.
+  if (items.length === 0) return null;
   return (
     <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 1 }}>
       {showLabels && (

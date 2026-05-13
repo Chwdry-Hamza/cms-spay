@@ -64,58 +64,8 @@ export default function TopBar({
         {subtitle && <div style={{ fontSize: 12, color: "var(--text-2)" }}>{subtitle}</div>}
       </div>
 
-      <div style={{ flex: 1, display: "flex", justifyContent: "center", maxWidth: 520, marginLeft: "auto" }}>
-        <div style={{ position: "relative", width: "100%" }}>
-          <Icon
-            name="search"
-            size={14}
-            style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-3)" }}
-          />
-          <input
-            className="input"
-            placeholder="Search pages, keywords, blogs…  ⌘K"
-            style={{ paddingLeft: 36, fontSize: 12.5, height: 38 }}
-          />
-          <span
-            className="mono"
-            style={{
-              position: "absolute",
-              right: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              fontSize: 9.5,
-              color: "var(--text-3)",
-              border: "1px solid var(--line)",
-              padding: "2px 6px",
-              borderRadius: 6,
-            }}
-          >
-            ⌘K
-          </span>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
         {actions}
-        <button className="btn icon ghost" title="Notifications" style={{ position: "relative" }}>
-          <Icon name="bell" size={15} />
-          <span
-            style={{
-              position: "absolute",
-              top: 7,
-              right: 7,
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "var(--accent)",
-              boxShadow: "0 0 8px var(--accent)",
-            }}
-          />
-        </button>
-        <button className="btn primary" style={{ height: 38 }}>
-          <Icon name="sparkles" size={13} />
-          New content
-        </button>
       </div>
     </header>
   );

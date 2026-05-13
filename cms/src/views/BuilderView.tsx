@@ -1,21 +1,136 @@
 "use client";
 import * as React from "react";
 import Icon from "@/components/Icon";
-import { INITIAL_SECTIONS, type SectionMeta } from "./builder/sectionsData";
+import { type SectionMeta, type SectionType } from "./builder/sectionsData";
 import { SectionInspector } from "./builder/inspectors";
 import { LivePreview, type LivePreviewHandle, type Viewport } from "./builder/LivePreview";
+import { AddSectionModal } from "./builder/AddSectionModal";
+import { builderApi, type BackendLayoutItem } from "@/lib/builder-api";
 
 type Layout = "mobile" | "tablet" | "desktop";
 
+function mapBackendItem(item: BackendLayoutItem): SectionMeta {
+  // Every section is now keyed by its per-instance id so multiple instances of
+  // any preset can coexist on the page (the home page renders dynamically from
+  // the layout — see spay-website's DynamicPage).
+  return {
+    id: item.instanceId,
+    instanceId: item.instanceId,
+    type: item.sectionKey as SectionType,
+    name: item.name,
+    file: item.file,
+    icon: item.icon as SectionMeta["icon"],
+    visible: item.visible,
+    locked: item.locked,
+    description: item.description,
+    data: item.data ?? {},
+  };
+}
+
 export default function BuilderView() {
-  const [sections, setSections] = React.useState<SectionMeta[]>(INITIAL_SECTIONS);
-  const [selectedId, setSelectedId] = React.useState<string>("homeHero");
+  const [sections, setSections] = React.useState<SectionMeta[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string>("");
   const [viewport, setViewport] = React.useState<Viewport>("desktop");
-  const [status, setStatus] = React.useState<"draft" | "published">("published");
+  const [status, setStatus] = React.useState<"draft" | "published">("draft");
   const [isDirty, setIsDirty] = React.useState(false);
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [overId, setOverId] = React.useState<string | null>(null);
   const [showOutlines, setShowOutlines] = React.useState(true);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isPublishing, setIsPublishing] = React.useState(false);
+  const [inspectorTab, setInspectorTab] = React.useState<"content" | "style">("content");
+  const [isAddOpen, setIsAddOpen] = React.useState(false);
+
+  // Initial load from the backend.
+  React.useEffect(() => {
+    let cancelled = false;
+    builderApi
+      .getPage()
+      .then(({ page }) => {
+        if (cancelled) return;
+        const mapped = page.draftLayout.map(mapBackendItem);
+        setSections(mapped);
+        // Snapshot the loaded layout so "Discard" can revert local edits
+        // without a backend round-trip when nothing has been saved yet.
+        baselineSectionsRef.current = mapped.map((s) => ({ ...s, data: { ...s.data } }));
+        setSelectedId(mapped[0]?.id ?? "");
+        setStatus(page.status);
+        setIsDirty(page.isDirty);
+        setIsLoaded(true);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setLoadError(err.message);
+        setIsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Per-section pending edits, NOT yet sent to the backend. Content patches
+  // stay local until the user clicks "Save draft" — auto-saving was removed
+  // so the user has explicit control over what becomes a saved draft.
+  const pendingPatchesRef = React.useRef<Record<string, Record<string, unknown>>>({});
+  // Tracks whether any locally-pending edits exist for the topbar's discard
+  // button enable-state.
+  const [hasPendingEdits, setHasPendingEdits] = React.useState(false);
+
+  // The last-loaded server state. Used to revert local edits when the user
+  // clicks "Discard" without round-tripping the backend.
+  const baselineSectionsRef = React.useRef<SectionMeta[]>([]);
+
+  const flushPatch = React.useCallback(
+    async (id: string): Promise<void> => {
+      const diff = pendingPatchesRef.current[id];
+      if (!diff || Object.keys(diff).length === 0) return;
+      const section = sectionsRef.current.find((s) => s.id === id);
+      if (!section?.instanceId) return;
+      delete pendingPatchesRef.current[id];
+      try {
+        await builderApi.patchSection(section.instanceId, { data: diff });
+      } catch (err) {
+        const apiErr = err as { code?: string; message?: string; details?: unknown };
+        const summary = {
+          section: section.type,
+          instanceId: section.instanceId,
+          diff,
+          code: apiErr.code ?? null,
+          message: apiErr.message ?? null,
+          details: apiErr.details ?? null,
+        };
+        // eslint-disable-next-line no-console
+        console.error("[builder] patch failed:\n" + JSON.stringify(summary, null, 2));
+        // eslint-disable-next-line no-console
+        console.error("[builder] raw error object:", err);
+        // Re-stage the diff so a retry on next save still picks it up.
+        pendingPatchesRef.current[id] = { ...(pendingPatchesRef.current[id] ?? {}), ...diff };
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const sectionsRef = React.useRef<SectionMeta[]>([]);
+  React.useEffect(() => {
+    sectionsRef.current = sections;
+  }, [sections]);
+
+  // Warn before the user leaves the page if they have unsaved local edits —
+  // we deliberately don't auto-save, so the only safety net is the browser
+  // beforeunload prompt.
+  React.useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (Object.keys(pendingPatchesRef.current).length === 0) return;
+      e.preventDefault();
+      // Some browsers need returnValue set for the prompt to show.
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   // Adaptive layout for the builder shell itself (panels become drawers on tablet/mobile).
   const [layout, setLayout] = React.useState<Layout>("desktop");
@@ -76,40 +191,182 @@ export default function BuilderView() {
       prev.map((s) => (s.id === selectedId ? { ...s, data: { ...s.data, ...next } } : s))
     );
     setIsDirty(true);
-    setStatus("draft");
     // Broadcast the patch to the iframe so the live preview updates immediately.
     previewRef.current?.send({
       type: "PREVIEW_PATCH",
       payload: { id: selectedId, data: next },
     });
+
+    // Accumulate the diff per section id — actual backend writes happen on
+    // explicit "Save draft" only. No auto-flush timer.
+    const id = selectedId;
+    pendingPatchesRef.current[id] = { ...(pendingPatchesRef.current[id] ?? {}), ...next };
+    setHasPendingEdits(true);
   };
 
   const toggleVisible = (id: string) => {
-    setSections((prev) => prev.map((s) => (s.id === id ? { ...s, visible: !s.visible } : s)));
-    const next = sections.find((s) => s.id === id);
-    if (next) {
-      previewRef.current?.send({
-        type: "PREVIEW_VISIBILITY",
-        payload: { id, visible: !next.visible },
-      });
-    }
-    setIsDirty(true);
-    setStatus("draft");
-  };
-
-  const moveSection = (fromId: string, toId: string) => {
-    setSections((prev) => {
-      const fromIdx = prev.findIndex((s) => s.id === fromId);
-      const toIdx = prev.findIndex((s) => s.id === toId);
-      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return prev;
-      const next = [...prev];
-      const [item] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, item);
-      return next;
+    const target = sections.find((s) => s.id === id);
+    if (!target) return;
+    const nextVisible = !target.visible;
+    setSections((prev) => prev.map((s) => (s.id === id ? { ...s, visible: nextVisible } : s)));
+    previewRef.current?.send({
+      type: "PREVIEW_VISIBILITY",
+      payload: { id, visible: nextVisible },
     });
     setIsDirty(true);
     setStatus("draft");
+    if (target.instanceId) {
+      builderApi
+        .patchSection(target.instanceId, { visible: nextVisible })
+        .catch((err) => console.error("[builder] visibility patch failed", err));
+    }
   };
+
+  const moveSection = (fromId: string, toId: string) => {
+    const fromIdx = sections.findIndex((s) => s.id === fromId);
+    const toIdx = sections.findIndex((s) => s.id === toId);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+
+    const next = [...sections];
+    const [item] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, item);
+    setSections(next);
+    setIsDirty(true);
+    setStatus("draft");
+
+    const fromInstanceId = sections[fromIdx]?.instanceId;
+    const toInstanceId = sections[toIdx]?.instanceId;
+    if (fromInstanceId && toInstanceId) {
+      builderApi
+        .reorder({ fromInstanceId, toInstanceId })
+        .catch((err) => console.error("[builder] reorder failed", err));
+    }
+  };
+
+  const handleSectionAdded = React.useCallback(
+    async (sectionKey: string) => {
+      try {
+        const { page } = await builderApi.getPage();
+        const mapped = page.draftLayout.map(mapBackendItem);
+        setSections(mapped);
+        // Re-baseline: the add already wrote to the server draft, so this
+        // is now the new "last server state" for Discard to fall back to.
+        baselineSectionsRef.current = mapped.map((s) => ({ ...s, data: { ...s.data } }));
+        setStatus(page.status);
+        setIsDirty(page.isDirty);
+        const added = mapped.find((s) => s.id === sectionKey);
+        if (added) {
+          setSelectedId(added.id);
+          // Push the freshly-loaded data into the iframe and scroll to it.
+          previewRef.current?.send({
+            type: "PREVIEW_PATCH",
+            payload: { id: added.id, data: added.data },
+          });
+          previewRef.current?.send({
+            type: "PREVIEW_VISIBILITY",
+            payload: { id: added.id, visible: added.visible },
+          });
+          previewRef.current?.scrollToSection(added.id);
+        }
+      } catch (err) {
+        console.error("[builder] reload after add failed", err);
+      }
+    },
+    [],
+  );
+
+  const saveDraft = React.useCallback(async () => {
+    setIsSaving(true);
+    try {
+      // Flush every pending field patch first, then record a save revision.
+      for (const id of Object.keys(pendingPatchesRef.current)) {
+        await flushPatch(id);
+      }
+      const res = await builderApi.save({ kind: "manualSave" });
+      setIsDirty(res.isDirty);
+      // Re-baseline so the next Discard reverts to what we just saved.
+      baselineSectionsRef.current = sectionsRef.current.map((s) => ({
+        ...s,
+        data: { ...s.data },
+      }));
+      setHasPendingEdits(false);
+    } catch (err) {
+      console.error("[builder] save failed", err);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [flushPatch]);
+
+  const [isDiscarding, setIsDiscarding] = React.useState(false);
+  const discardDraft = React.useCallback(async () => {
+    const hasLocal = Object.keys(pendingPatchesRef.current).length > 0;
+    if (
+      !window.confirm(
+        hasLocal
+          ? "Discard unsaved changes? This will also clear any saved draft and restore the page to its last published state."
+          : "Remove the current draft? The page will be restored to its last published state.",
+      )
+    ) {
+      return;
+    }
+    setIsDiscarding(true);
+    try {
+      const { page } = await builderApi.discardDraft();
+      const mapped = page.draftLayout.map(mapBackendItem);
+      // Reset everything to the freshly-loaded server state.
+      pendingPatchesRef.current = {};
+      setHasPendingEdits(false);
+      setSections(mapped);
+      baselineSectionsRef.current = mapped.map((s) => ({ ...s, data: { ...s.data } }));
+      setStatus(page.status);
+      setIsDirty(page.isDirty);
+      // Push the restored data into the iframe so the live preview matches.
+      for (const s of mapped) {
+        previewRef.current?.send({
+          type: "PREVIEW_PATCH",
+          payload: { id: s.id, data: s.data },
+        });
+        previewRef.current?.send({
+          type: "PREVIEW_VISIBILITY",
+          payload: { id: s.id, visible: s.visible },
+        });
+      }
+      // Custom-section list may have shrunk/grown — keep iframe in sync.
+      const customInstances = mapped
+        .filter((s) => s.type === "customSection")
+        .map((s) => s.id);
+      previewRef.current?.send({
+        type: "PREVIEW_LAYOUT",
+        payload: { customInstances },
+      });
+    } catch (err) {
+      console.error("[builder] discard failed", err);
+    } finally {
+      setIsDiscarding(false);
+    }
+  }, []);
+
+  const publishPage = React.useCallback(async () => {
+    setIsPublishing(true);
+    try {
+      // Flush pending patches first so publish includes the latest local edits.
+      for (const id of Object.keys(pendingPatchesRef.current)) {
+        await flushPatch(id);
+      }
+      const res = await builderApi.publish();
+      setStatus(res.status);
+      setIsDirty(res.isDirty);
+      baselineSectionsRef.current = sectionsRef.current.map((s) => ({
+        ...s,
+        data: { ...s.data },
+      }));
+      setHasPendingEdits(false);
+    } catch (err) {
+      console.error("[builder] publish failed", err);
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [flushPatch]);
 
   // Re-broadcast all current data when the iframe announces it's ready (e.g., after navigation/reload).
   const handleReady = React.useCallback(() => {
@@ -121,6 +378,31 @@ export default function BuilderView() {
   }, []);
 
   const isDrawerLayout = layout !== "desktop";
+
+  if (loadError) {
+    return (
+      <div style={{ padding: 40, color: "var(--text-2)" }}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+          Could not load the Builder
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-3)", marginBottom: 12 }}>
+          {loadError}
+        </div>
+        <div className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>
+          Is cms-backend running at {process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000"}?
+          Did you run `npm run seed`?
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoaded || sections.length === 0) {
+    return (
+      <div style={{ padding: 40, color: "var(--text-3)", fontSize: 12 }}>
+        Loading builder…
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
@@ -144,6 +426,13 @@ export default function BuilderView() {
           setRightOpen((v) => !v);
           if (layout === "mobile") setLeftOpen(false);
         }}
+        onSaveDraft={saveDraft}
+        onPublish={publishPage}
+        onDiscardDraft={discardDraft}
+        isSaving={isSaving}
+        isPublishing={isPublishing}
+        isDiscarding={isDiscarding}
+        hasPendingEdits={hasPendingEdits}
       />
 
       <div className={`builder-shell layout-${layout}`}>
@@ -168,27 +457,6 @@ export default function BuilderView() {
           <div className="pane-header">
             <Icon name="layers" size={14} style={{ color: "var(--accent-2)" }} />
             <span style={{ fontSize: 12, fontWeight: 600 }}>Sections</span>
-            <span
-              className="mono"
-              style={{
-                fontSize: 9,
-                color: "var(--text-3)",
-                background: "rgba(255,255,255,.03)",
-                padding: "2px 6px",
-                borderRadius: 999,
-                marginLeft: 4,
-              }}
-            >
-              {sections.length}
-            </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-              <button className="btn icon ghost" title="Search">
-                <Icon name="search" size={13} />
-              </button>
-              <button className="btn icon ghost" title="Add section">
-                <Icon name="plus" size={13} />
-              </button>
-            </div>
           </div>
 
           <div className="pane-body dense nice-scroll">
@@ -263,6 +531,7 @@ export default function BuilderView() {
                 borderStyle: "dashed",
                 color: "var(--accent-2)",
               }}
+              onClick={() => setIsAddOpen(true)}
             >
               <Icon name="plus" size={12} />
               Add new section
@@ -359,22 +628,34 @@ export default function BuilderView() {
 
             <div style={{ padding: "10px 14px 0" }}>
               <div className="tab-strip" style={{ width: "100%" }}>
-                <button className="on" style={{ flex: 1, justifyContent: "center" }}>
+                <button
+                  className={inspectorTab === "content" ? "on" : ""}
+                  style={{ flex: 1, justifyContent: "center" }}
+                  onClick={() => setInspectorTab("content")}
+                >
                   <Icon name="type" size={11} /> Content
                 </button>
-                <button style={{ flex: 1, justifyContent: "center" }}>
+                <button
+                  className={inspectorTab === "style" ? "on" : ""}
+                  style={{ flex: 1, justifyContent: "center" }}
+                  onClick={() => setInspectorTab("style")}
+                >
                   <Icon name="palette" size={11} /> Style
-                </button>
-                <button style={{ flex: 1, justifyContent: "center" }}>
-                  <Icon name="globe" size={11} /> SEO
                 </button>
               </div>
             </div>
 
-            <SectionInspector section={selected} patch={patch} />
+            <SectionInspector section={selected} patch={patch} tab={inspectorTab} />
           </div>
         </aside>
       </div>
+
+      <AddSectionModal
+        open={isAddOpen}
+        existingSections={sections}
+        onClose={() => setIsAddOpen(false)}
+        onAdded={handleSectionAdded}
+      />
     </div>
   );
 }
@@ -393,6 +674,13 @@ function BuilderTopbar({
   rightOpen,
   toggleLeft,
   toggleRight,
+  onSaveDraft,
+  onPublish,
+  onDiscardDraft,
+  isSaving,
+  isPublishing,
+  isDiscarding,
+  hasPendingEdits,
 }: {
   viewport: Viewport;
   setViewport: (v: Viewport) => void;
@@ -407,6 +695,13 @@ function BuilderTopbar({
   rightOpen: boolean;
   toggleLeft: () => void;
   toggleRight: () => void;
+  onSaveDraft: () => void;
+  onPublish: () => void;
+  onDiscardDraft: () => void;
+  isSaving: boolean;
+  isPublishing: boolean;
+  isDiscarding: boolean;
+  hasPendingEdits: boolean;
 }) {
   const isCompact = layout !== "desktop";
   return (
@@ -494,46 +789,87 @@ function BuilderTopbar({
       <div style={{ flex: 1 }} />
 
       {layout === "desktop" && (
-        <span className={`status-pill ${status === "published" && !isDirty ? "published" : "draft"}`}>
-          <span className={`dot ${status === "published" && !isDirty ? "good" : "warn"}`} />
-          {status === "published" && !isDirty
+        <span
+          className={`status-pill ${
+            status === "published" && !isDirty && !hasPendingEdits ? "published" : "draft"
+          }`}
+          title={
+            hasPendingEdits
+              ? "You have unsaved edits. Click \"Save draft\" to persist them."
+              : undefined
+          }
+        >
+          <span
+            className={`dot ${
+              status === "published" && !isDirty && !hasPendingEdits ? "good" : "warn"
+            }`}
+          />
+          {hasPendingEdits
+            ? "Unsaved edits"
+            : status === "published" && !isDirty
             ? "Published · in sync"
             : isDirty
-            ? "Unsaved changes"
+            ? "Draft saved"
             : "Draft"}
         </span>
       )}
 
+      {!isCompact && (hasPendingEdits || isDirty) && (
+        <button
+          className="btn"
+          style={{ padding: "8px 12px", opacity: isDiscarding ? 0.6 : 1 }}
+          onClick={onDiscardDraft}
+          disabled={isDiscarding}
+          title={
+            hasPendingEdits
+              ? "Discard unsaved edits and remove the saved draft"
+              : "Remove the saved draft and restore the last published state"
+          }
+        >
+          <Icon name="trash" size={13} />
+          {isDiscarding ? "Discarding…" : "Discard"}
+        </button>
+      )}
+
       {!isCompact && (
-        <>
-          <button className="btn" style={{ padding: "8px 12px" }}>
-            <Icon name="eye" size={13} />
-            Preview
-          </button>
-          <button
-            className="btn"
-            style={{ padding: "8px 12px" }}
-            onClick={() => {
-              setIsDirty(false);
-              setStatus("draft");
-            }}
-          >
-            <Icon name="save" size={13} />
-            Save draft
-          </button>
-        </>
+        <button
+          className="btn"
+          style={{
+            padding: "8px 12px",
+            opacity: isSaving ? 0.6 : 1,
+            // Visually emphasize the save action when there are pending edits.
+            ...(hasPendingEdits
+              ? {
+                  borderColor: "rgba(4,186,191,.5)",
+                  boxShadow: "0 0 0 1px rgba(4,186,191,.25)",
+                  color: "var(--accent-2)",
+                }
+              : {}),
+          }}
+          onClick={onSaveDraft}
+          disabled={isSaving || !hasPendingEdits}
+          title={
+            hasPendingEdits
+              ? "Persist your edits as a draft"
+              : "No unsaved edits"
+          }
+        >
+          <Icon name="save" size={13} />
+          {isSaving ? "Saving…" : "Save draft"}
+        </button>
       )}
       <button
         className="btn primary"
-        style={{ padding: isCompact ? "8px 12px" : "8px 14px" }}
-        onClick={() => {
-          setStatus("published");
-          setIsDirty(false);
+        style={{
+          padding: isCompact ? "8px 12px" : "8px 14px",
+          opacity: isPublishing ? 0.6 : 1,
         }}
+        onClick={onPublish}
+        disabled={isPublishing}
         title="Publish"
       >
         <Icon name="rocket" size={13} />
-        {!isCompact && "Publish"}
+        {!isCompact && (isPublishing ? "Publishing…" : "Publish")}
       </button>
       {isCompact && (
         <button
