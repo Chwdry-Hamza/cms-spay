@@ -53,6 +53,32 @@ export interface IContentPage {
   noindex: boolean;
   draftBlocks: IBlock[];
   publishedBlocks: IBlock[] | null;
+  /**
+   * Internal-link index, derived from `draftBlocks` on every save. Lets the
+   * "Pages linking here" panel and the slug-rename / delete safety flows
+   * answer "who links to slug X?" in a single indexed query rather than
+   * scanning every page's block content on each lookup.
+   *
+   * Tracking *draft* links (rather than published) is deliberate: it catches
+   * pages an editor is mid-way through writing a link in. The point of the
+   * safety prompts is to prevent the editor breaking a soon-to-be-live link;
+   * waiting for publish would miss exactly those cases.
+   */
+  outgoingLinks: IOutgoingLink[];
+  /**
+   * Freeform editor-supplied labels for this page (e.g. "finance",
+   * "compliance", "consumer"). Powers two SEO features:
+   *
+   *   1. The "Related pages" suggestions inside the link picker — pages
+   *      sharing tags are surfaced first when an editor is looking for
+   *      something to internal-link to.
+   *   2. (Future) Public-site "Related articles" sections at the bottom
+   *      of content pages.
+   *
+   * Stored lowercase + trimmed; the service layer is the single
+   * normalization point so the index stays well-behaved.
+   */
+  tags: string[];
   version: number;
   lastSavedAt: Date | null;
   lastPublishedAt: Date | null;
@@ -66,12 +92,27 @@ export interface IContentPage {
   updatedAt: Date;
 }
 
+export interface IOutgoingLink {
+  targetSlug: string;
+  anchor: string;
+  blockId: string;
+}
+
 export type ContentPageDoc = HydratedDocument<IContentPage>;
 
 const HeadingPartSchema = new Schema<HeadingPart>(
   {
     text: { type: String, required: true },
     color: { type: String },
+  },
+  { _id: false },
+);
+
+const OutgoingLinkSchema = new Schema<IOutgoingLink>(
+  {
+    targetSlug: { type: String, required: true },
+    anchor: { type: String, default: '' },
+    blockId: { type: String, default: '' },
   },
   { _id: false },
 );
@@ -116,6 +157,8 @@ const ContentPageSchema = new Schema<IContentPage>(
     noindex: { type: Boolean, default: false },
     draftBlocks: { type: [BlockSchema], default: [] },
     publishedBlocks: { type: [BlockSchema], default: null },
+    outgoingLinks: { type: [OutgoingLinkSchema], default: [] },
+    tags: { type: [String], default: [] },
     version: { type: Number, default: 0 },
     lastSavedAt: { type: Date, default: null },
     lastPublishedAt: { type: Date, default: null },
@@ -132,5 +175,13 @@ ContentPageSchema.index(
   { workspaceId: 1, scheduledPublishAt: 1 },
   { sparse: true },
 );
+// Backlink lookup — "find every page linking to slug X" is a hot read on
+// the slug-rename / delete-safety paths, so we index the array field
+// directly. Mongo multikey indexes handle the per-element targetSlug match.
+ContentPageSchema.index({ workspaceId: 1, 'outgoingLinks.targetSlug': 1 });
+// Tag-based lookups for the "Related pages" picker — `tags: { $in: [...] }`
+// uses this multikey index. Both the autocomplete query (unwind/group)
+// and the related-pages aggregation benefit from it.
+ContentPageSchema.index({ workspaceId: 1, tags: 1 });
 
 export const ContentPage = model<IContentPage>('ContentPage', ContentPageSchema);

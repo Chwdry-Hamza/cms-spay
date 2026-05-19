@@ -18,6 +18,7 @@ function serialize(page: Awaited<ReturnType<typeof svc.getContentPage>>) {
     noindex: page.noindex ?? false,
     draftBlocks: page.draftBlocks,
     publishedBlocks: page.publishedBlocks,
+    tags: page.tags ?? [],
     version: page.version,
     lastSavedAt: page.lastSavedAt,
     lastPublishedAt: page.lastPublishedAt,
@@ -83,6 +84,52 @@ export async function restoreRevision(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  await svc.deleteContentPage(req.params.slug);
-  res.json({ ok: true, data: { deleted: true } });
+  // Backlink-aware delete: by default refuses if other pages link here.
+  // Accepts query params:
+  //   - redirectTo=newSlug → also creates a 308 from this slug to newSlug
+  //   - force=true → admin override, lets backlinks 404
+  const redirectTo =
+    typeof req.query.redirectTo === 'string' && req.query.redirectTo.length > 0
+      ? req.query.redirectTo
+      : null;
+  const force = req.query.force === 'true' || req.query.force === '1';
+  const result = await svc.deleteContentPageSafely(req.params.slug, {
+    redirectTo,
+    force,
+  });
+  res.json({ ok: true, data: result });
+}
+
+export async function listBacklinks(req: Request, res: Response) {
+  const backlinks = await svc.listContentPageBacklinks(req.params.slug);
+  res.json({ ok: true, data: { backlinks } });
+}
+
+export async function rewriteInternalLinks(req: Request, res: Response) {
+  const summary = await svc.rewriteInternalLinks(
+    req.body.fromSlug,
+    req.body.toSlug,
+  );
+  res.json({
+    ok: true,
+    data: {
+      rewritten: summary,
+      totalPages: summary.length,
+      totalReplacements: summary.reduce((acc, r) => acc + r.replacements, 0),
+    },
+  });
+}
+
+export async function listTags(_req: Request, res: Response) {
+  const tags = await svc.listAllContentPageTags();
+  res.json({ ok: true, data: { tags } });
+}
+
+export async function listRelated(req: Request, res: Response) {
+  const limit =
+    typeof req.query.limit === 'string'
+      ? Math.max(1, Math.min(50, Number(req.query.limit) || 8))
+      : 8;
+  const related = await svc.listRelatedContentPages(req.params.slug, limit);
+  res.json({ ok: true, data: { related } });
 }

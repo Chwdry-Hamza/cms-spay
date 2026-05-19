@@ -4,8 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import Icon from "@/components/Icon";
 import { Card, SectionHeader } from "@/components/Card";
+import { DeleteWithRedirectModal } from "@/components/DeleteWithRedirectModal";
+import { ApiError } from "@/lib/builder-api";
 import {
   contentPagesApi,
+  type ContentPageBacklink,
   type ContentPageSummary,
 } from "@/lib/content-pages-api";
 
@@ -42,13 +45,49 @@ export default function ContentPagesView() {
     reload();
   }, [reload]);
 
+  // Backlink-aware delete state. When the first delete attempt fails
+  // because other pages link to this slug, we capture the offending
+  // backlinks here and surface DeleteWithRedirectModal so the editor
+  // can pick a redirect target before retrying.
+  const [pendingDelete, setPendingDelete] = React.useState<{
+    slug: string;
+    backlinks: ContentPageBacklink[];
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
+
   const handleDelete = async (slug: string) => {
     if (!window.confirm(`Delete page "${slug}"? This cannot be undone.`)) return;
+    setIsDeleting(true);
     try {
       await contentPagesApi.remove(slug);
       await reload();
     } catch (e) {
+      // Backend refuses to drop pages with inbound links — surface the
+      // redirect picker rather than the raw error so the editor has a
+      // path forward.
+      if (e instanceof ApiError && e.code === "BACKLINKS_PRESENT") {
+        const backlinks =
+          (e.details as { backlinks?: ContentPageBacklink[] })?.backlinks ?? [];
+        setPendingDelete({ slug, backlinks });
+      } else {
+        window.alert(`Delete failed: ${(e as Error).message}`);
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const confirmDeleteWithRedirect = async (redirectTo: string) => {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    try {
+      await contentPagesApi.remove(pendingDelete.slug, { redirectTo });
+      setPendingDelete(null);
+      await reload();
+    } catch (e) {
       window.alert(`Delete failed: ${(e as Error).message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -255,6 +294,16 @@ export default function ContentPagesView() {
           }}
         />
       )}
+
+      <DeleteWithRedirectModal
+        open={pendingDelete !== null}
+        slug={pendingDelete?.slug ?? ""}
+        backlinks={pendingDelete?.backlinks ?? []}
+        candidatePages={pages}
+        busy={isDeleting}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDeleteWithRedirect}
+      />
     </div>
   );
 }

@@ -61,12 +61,24 @@ export type ContentPage = {
   noindex: boolean;
   draftBlocks: ContentBlock[];
   publishedBlocks: ContentBlock[] | null;
+  tags: string[];
   version: number;
   lastSavedAt: string | null;
   lastPublishedAt: string | null;
   scheduledPublishAt: string | null;
   updatedAt: string;
 };
+
+export type RelatedContentPage = {
+  slug: string;
+  title: string;
+  status: "draft" | "published";
+  tags: string[];
+  overlap: number;
+  updatedAt: string | null;
+};
+
+export type TagUsage = { tag: string; usage: number };
 
 type Envelope<T> =
   | { ok: true; data: T }
@@ -121,6 +133,7 @@ export const contentPagesApi = {
     ogImage?: string | null;
     noindex?: boolean;
     blocks?: ContentBlock[];
+    tags?: string[];
   }) =>
     request<{ page: ContentPage }>("/api/v1/content-pages", {
       method: "POST",
@@ -142,6 +155,7 @@ export const contentPagesApi = {
       ogImage?: string | null;
       noindex?: boolean;
       blocks?: ContentBlock[];
+      tags?: string[];
     },
   ) =>
     request<{ page: ContentPage }>(`/api/v1/content-pages/${slugPath(slug)}`, {
@@ -149,10 +163,36 @@ export const contentPagesApi = {
       json: body,
     }),
 
-  remove: (slug: string) =>
-    request<{ deleted: true }>(`/api/v1/content-pages/${slugPath(slug)}`, {
-      method: "DELETE",
-    }),
+  /**
+   * Delete a content page. Backlink-aware: if other pages currently link
+   * to this slug, the backend refuses with `code: BACKLINKS_PRESENT` and
+   * `error.details.backlinks` lists the offending pages. Pass `redirectTo`
+   * to (1) rewrite every page that links here so it points at the target
+   * directly, and (2) also create a 308 from this slug as a safety net for
+   * external inbound links. Pass `force` to delete without rewriting or
+   * redirecting (admin override — backlinks will 404 afterwards).
+   */
+  remove: (
+    slug: string,
+    opts?: { redirectTo?: string | null; force?: boolean },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.redirectTo) params.set("redirectTo", opts.redirectTo);
+    if (opts?.force) params.set("force", "true");
+    const qs = params.toString();
+    return request<{
+      deleted: true;
+      redirectCreated: string | null;
+      rewritten: Array<{
+        slug: string;
+        title: string;
+        replacements: number;
+      }>;
+    }>(
+      `/api/v1/content-pages/${slugPath(slug)}${qs ? `?${qs}` : ""}`,
+      { method: "DELETE" },
+    );
+  },
 
   publish: (slug: string) =>
     request<{ page: ContentPage }>(
@@ -190,6 +230,57 @@ export const contentPagesApi = {
       )}/restore`,
       { method: "POST" },
     ),
+
+  /**
+   * Pages that currently link to `slug`. Used by the editor's "Pages
+   * linking here" panel and by the slug-rename / delete safety prompts to
+   * show editors what will break before they commit.
+   */
+  listBacklinks: (slug: string) =>
+    request<{ backlinks: ContentPageBacklink[] }>(
+      `/api/v1/content-pages/${slugPath(slug)}/backlinks`,
+    ),
+
+  /**
+   * Every distinct tag currently in use, with its usage count. Powers
+   * the tag-input autocomplete in the editor so editors converge on a
+   * shared vocabulary instead of typo'ing their own variants.
+   */
+  listTags: () =>
+    request<{ tags: TagUsage[] }>("/api/v1/content-pages/tags"),
+
+  /**
+   * Pages most relevant to the given slug, ranked by tag overlap then
+   * recency. Used by the "Related pages" section of the link picker so
+   * editors can spot natural internal-link opportunities while writing.
+   */
+  listRelated: (slug: string, limit = 8) =>
+    request<{ related: RelatedContentPage[] }>(
+      `/api/v1/content-pages/${slugPath(slug)}/related?limit=${limit}`,
+    ),
+
+  /**
+   * Bulk-rewrite every `[label](/fromSlug)` reference to `[label](/toSlug)`
+   * across every page's draft blocks. The editor calls this after
+   * confirming a slug rename with backlinks. Doesn't auto-publish — each
+   * affected page becomes dirty so it can be reviewed first.
+   */
+  rewriteInternalLinks: (fromSlug: string, toSlug: string) =>
+    request<{
+      rewritten: Array<{ slug: string; title: string; replacements: number }>;
+      totalPages: number;
+      totalReplacements: number;
+    }>("/api/v1/content-pages/internal-link-rewrites", {
+      method: "POST",
+      json: { fromSlug, toSlug },
+    }),
+};
+
+export type ContentPageBacklink = {
+  slug: string;
+  title: string;
+  status: "draft" | "published";
+  links: { anchor: string; blockId: string }[];
 };
 
 export function newBlockId(): string {

@@ -6,6 +6,7 @@ import {
   ContentSlugParam,
   ContentSlugWithRevParam,
   CreateContentPageBody,
+  RewriteInternalLinksBody,
   SchedulePublishBody,
   UpdateContentPageBody,
 } from './contentPage.schemas';
@@ -14,6 +15,19 @@ const r = Router();
 
 r.get('/', asyncHandler(ctl.list));
 r.post('/', validate(CreateContentPageBody), asyncHandler(ctl.create));
+
+// Bulk link rewrite — declared BEFORE `/:slug` so Express doesn't try to
+// match the literal `internal-link-rewrites` as a slug param.
+r.post(
+  '/internal-link-rewrites',
+  validate(RewriteInternalLinksBody),
+  asyncHandler(ctl.rewriteInternalLinks),
+);
+
+// Tag autocomplete — same ordering requirement: declared before `/:slug`
+// so Express doesn't capture `tags` as a slug param.
+r.get('/tags', asyncHandler(ctl.listTags));
+
 r.get('/:slug', validate(ContentSlugParam, 'params'), asyncHandler(ctl.get));
 r.patch(
   '/:slug',
@@ -45,6 +59,16 @@ r.post(
   '/:slug/revisions/:revId/restore',
   validate(ContentSlugWithRevParam, 'params'),
   asyncHandler(ctl.restoreRevision),
+);
+r.get(
+  '/:slug/backlinks',
+  validate(ContentSlugParam, 'params'),
+  asyncHandler(ctl.listBacklinks),
+);
+r.get(
+  '/:slug/related',
+  validate(ContentSlugParam, 'params'),
+  asyncHandler(ctl.listRelated),
 );
 
 export default r;

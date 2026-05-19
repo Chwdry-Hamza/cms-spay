@@ -70,6 +70,16 @@ const Block = z.discriminatedUnion('type', [
 
 export const BlocksArray = z.array(Block);
 
+/**
+ * Freeform editor-supplied tag labels (1–48 chars each, max 32 tags per
+ * page). Service-layer `normalizeTags()` lowercases + trims + dedupes
+ * before persisting, so the schema's role here is only to bound size and
+ * keep absurd inputs out.
+ */
+const TagsArray = z
+  .array(z.string().min(1).max(48))
+  .max(32);
+
 export const CreateContentPageBody = z.object({
   slug: z
     .string()
@@ -87,6 +97,7 @@ export const CreateContentPageBody = z.object({
   ogImage: z.string().max(2000).optional().nullable(),
   noindex: z.boolean().optional(),
   blocks: BlocksArray.optional(),
+  tags: TagsArray.optional(),
 });
 
 export const SchedulePublishBody = z
@@ -97,6 +108,33 @@ export const SchedulePublishBody = z
       .refine((s) => !Number.isNaN(Date.parse(s)), 'Must be an ISO-8601 timestamp.'),
   })
   .strict();
+
+/**
+ * Body for `POST /api/v1/content-pages/internal-link-rewrites` —
+ * bulk-rewrite every `[label](/fromSlug)` to `[label](/toSlug)` across
+ * every page's draft blocks. Used by the slug-rename flow after the
+ * editor confirms "also rewrite backlinks". Both slugs go through the
+ * same lowercase-alphanumeric-and-hyphens validation as the page slugs
+ * themselves so callers can't accidentally rewrite to garbage.
+ */
+export const RewriteInternalLinksBody = z
+  .object({
+    fromSlug: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[a-z0-9][a-z0-9-]*$/, 'Slug must be lowercase letters, numbers, and hyphens only.'),
+    toSlug: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[a-z0-9][a-z0-9-]*$/, 'Slug must be lowercase letters, numbers, and hyphens only.'),
+  })
+  .strict()
+  .refine((v) => v.fromSlug !== v.toSlug, {
+    message: 'fromSlug and toSlug must differ.',
+    path: ['toSlug'],
+  });
 
 export const UpdateContentPageBody = z
   .object({
@@ -117,6 +155,7 @@ export const UpdateContentPageBody = z
     ogImage: z.string().max(2000).nullable().optional(),
     noindex: z.boolean().optional(),
     blocks: BlocksArray.optional(),
+    tags: TagsArray.optional(),
   })
   .strict()
   .refine(
@@ -132,6 +171,7 @@ export const UpdateContentPageBody = z
       v.seoKeywords !== undefined ||
       v.ogImage !== undefined ||
       v.noindex !== undefined ||
-      v.blocks !== undefined,
+      v.blocks !== undefined ||
+      v.tags !== undefined,
     'At least one field is required',
   );

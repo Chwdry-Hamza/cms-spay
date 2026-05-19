@@ -9,13 +9,17 @@ import {
   LinkPickerModal,
   buildLinkMarkdown,
 } from "@/components/LinkPickerModal";
+import { SlugRenameConfirmModal } from "@/components/SlugRenameConfirmModal";
 import {
   contentPagesApi,
   newBlockId,
   type ContentBlock,
   type ContentPage,
+  type ContentPageBacklink,
   type HeadingLevel,
+  type TagUsage,
 } from "@/lib/content-pages-api";
+import { TagChipInput } from "@/components/TagChipInput";
 
 /**
  * Replace the current selection in a textarea with the given markdown
@@ -36,6 +40,17 @@ function insertAtSelection(
 }
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * The public site host content pages are actually served from
+ * (e.g. spay-website on http://localhost:3000). Used by the canvas preview
+ * to resolve `/slug` internal links to their true public URL — without
+ * this, the browser would interpret them relative to the CMS host
+ * (localhost:3001), so editors hovering a link would see the wrong URL
+ * and right-click "Open in new tab" would 404.
+ */
+const PUBLIC_SITE_BASE =
+  process.env.NEXT_PUBLIC_PREVIEW_URL || "http://localhost:3000";
 
 /**
  * Format a scheduled-publish ISO timestamp for the topbar badge. Drops the
@@ -221,6 +236,12 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
   const [seoKeywords, setSeoKeywords] = React.useState<string>("");
   const [ogImage, setOgImage] = React.useState<string>("");
   const [noindex, setNoindex] = React.useState<boolean>(false);
+  const [tags, setTags] = React.useState<string[]>([]);
+  // Workspace-wide tag suggestions used for autocomplete inside the
+  // TagChipInput. Loaded once on mount and refreshed after each save so
+  // a freshly-typed tag becomes available across other pages without a
+  // full reload.
+  const [tagSuggestions, setTagSuggestions] = React.useState<TagUsage[]>([]);
   const [isDirty, setIsDirty] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [isLoaded, setIsLoaded] = React.useState(false);
@@ -236,6 +257,40 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
   >("insert");
   const [selectedBlockId, setSelectedBlockId] = React.useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [backlinks, setBacklinks] = React.useState<ContentPageBacklink[] | null>(
+    null,
+  );
+  const [backlinksLoading, setBacklinksLoading] = React.useState(false);
+  const [backlinksError, setBacklinksError] = React.useState<string | null>(null);
+  // When the editor renames a slug that other pages link to, we capture
+  // the rename here and surface the SlugRenameConfirmModal. The actual
+  // save/publish only runs after the editor picks one of the three modal
+  // outcomes (rewrite / redirect-only / cancel).
+  const [pendingSlugRename, setPendingSlugRename] = React.useState<{
+    fromSlug: string;
+    toSlug: string;
+    kind: "save" | "publish";
+  } | null>(null);
+
+  /**
+   * (Re)load the "Pages linking here" panel. Fired on slug change and
+   * after any operation that could affect the link graph (save, publish,
+   * restore, rewrite). Cheap enough to re-run eagerly because the
+   * endpoint is a single indexed Mongo query.
+   */
+  const loadBacklinks = React.useCallback(async () => {
+    setBacklinksLoading(true);
+    setBacklinksError(null);
+    try {
+      const { backlinks: rows } = await contentPagesApi.listBacklinks(slug);
+      setBacklinks(rows);
+    } catch (e) {
+      setBacklinks(null);
+      setBacklinksError((e as Error).message);
+    } finally {
+      setBacklinksLoading(false);
+    }
+  }, [slug]);
 
   const selectBlock = React.useCallback((id: string) => {
     setSelectedBlockId(id);
@@ -310,8 +365,26 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
     setSeoKeywords(p.seoKeywords ?? "");
     setOgImage(p.ogImage ?? "");
     setNoindex(p.noindex ?? false);
+    setTags(p.tags ?? []);
     setIsDirty(p.isDirty);
   }, []);
+
+  // Workspace tag suggestions for the chip-input autocomplete. Refreshed
+  // after each save so newly-coined tags propagate across the editor
+  // without a hard page reload.
+  const loadTagSuggestions = React.useCallback(async () => {
+    try {
+      const { tags: rows } = await contentPagesApi.listTags();
+      setTagSuggestions(rows);
+    } catch {
+      // Non-fatal — autocomplete just shows fewer suggestions.
+      setTagSuggestions([]);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadTagSuggestions();
+  }, [loadTagSuggestions]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -331,6 +404,14 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
       cancelled = true;
     };
   }, [slug, hydrate]);
+
+  // Backlinks ("Pages linking here") are loaded alongside the page itself
+  // so the Page tab is immediately useful when opened. Refetched on slug
+  // change too, because a slug rename can shift this page's incoming
+  // links (other pages got rewritten or now point at a redirect).
+  React.useEffect(() => {
+    loadBacklinks();
+  }, [loadBacklinks]);
 
   // Warn before navigating away with unsaved changes.
   React.useEffect(() => {
@@ -435,26 +516,57 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
     }
   };
 
-  const save = async () => {
+  /**
+   * The shared update payload for save / publish. Extracted so the
+   * rename-confirm flow can re-issue the same update without
+   * stringifying the body in two places.
+   */
+  const buildUpdateBody = (nextSlug: string | undefined) => ({
+    ...(nextSlug !== undefined ? { slug: nextSlug } : {}),
+    title: title.trim() || page?.title,
+    footerLabel: nullableTrim(footerLabel),
+    showInFooter,
+    effectiveDate: nullableTrim(effectiveDate),
+    lastUpdated: nullableTrim(lastUpdated),
+    seoTitle: nullableTrim(seoTitle),
+    seoDescription: nullableTrim(seoDescription),
+    seoKeywords: nullableTrim(seoKeywords),
+    ogImage: nullableTrim(ogImage),
+    noindex,
+    tags,
+    blocks,
+  });
+
+  /**
+   * Run the actual save against the API, optionally bulk-rewriting
+   * backlinks if the editor just confirmed a slug rename. Surfaces all
+   * failures to the user but always clears the busy flag.
+   */
+  const commitSave = async (rewriteBacklinks: boolean) => {
     setIsSaving(true);
     try {
       const nextSlug = slugChangedAndValid();
-      const { page: p } = await contentPagesApi.update(slug, {
-        ...(nextSlug !== undefined ? { slug: nextSlug } : {}),
-        title: title.trim() || page?.title,
-        footerLabel: nullableTrim(footerLabel),
-        showInFooter,
-        effectiveDate: nullableTrim(effectiveDate),
-        lastUpdated: nullableTrim(lastUpdated),
-        seoTitle: nullableTrim(seoTitle),
-        seoDescription: nullableTrim(seoDescription),
-        seoKeywords: nullableTrim(seoKeywords),
-        ogImage: nullableTrim(ogImage),
-        noindex,
-        blocks,
-      });
+      const fromSlug = page?.slug;
+      const { page: p } = await contentPagesApi.update(
+        slug,
+        buildUpdateBody(nextSlug),
+      );
       hydrate(p);
       syncRoute(p.slug);
+      if (
+        rewriteBacklinks &&
+        fromSlug &&
+        nextSlug &&
+        fromSlug !== nextSlug
+      ) {
+        await contentPagesApi.rewriteInternalLinks(fromSlug, nextSlug);
+      }
+      // Backlink graph likely changed (slug renamed and/or rewrites
+      // applied), so refresh the panel.
+      await loadBacklinks();
+      // Tag set may have grown — refresh the autocomplete pool so newly
+      // coined tags are available immediately in the next edit session.
+      await loadTagSuggestions();
     } catch (e) {
       window.alert(`Save failed: ${(e as Error).message}`);
     } finally {
@@ -462,34 +574,88 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
     }
   };
 
-  const publish = async () => {
+  const commitPublish = async (rewriteBacklinks: boolean) => {
     setIsPublishing(true);
     try {
-      // Save first so publish uses the latest content.
       const nextSlug = slugChangedAndValid();
-      const { page: saved } = await contentPagesApi.update(slug, {
-        ...(nextSlug !== undefined ? { slug: nextSlug } : {}),
-        title: title.trim() || page?.title,
-        footerLabel: nullableTrim(footerLabel),
-        showInFooter,
-        effectiveDate: nullableTrim(effectiveDate),
-        lastUpdated: nullableTrim(lastUpdated),
-        seoTitle: nullableTrim(seoTitle),
-        seoDescription: nullableTrim(seoDescription),
-        seoKeywords: nullableTrim(seoKeywords),
-        ogImage: nullableTrim(ogImage),
-        noindex,
-        blocks,
-      });
+      const fromSlug = page?.slug;
+      // Save first so publish uses the latest content.
+      const { page: saved } = await contentPagesApi.update(
+        slug,
+        buildUpdateBody(nextSlug),
+      );
       hydrate(saved);
+      if (
+        rewriteBacklinks &&
+        fromSlug &&
+        nextSlug &&
+        fromSlug !== nextSlug
+      ) {
+        await contentPagesApi.rewriteInternalLinks(fromSlug, nextSlug);
+      }
       // Publish endpoint takes the (possibly renamed) saved.slug.
       const { page: published } = await contentPagesApi.publish(saved.slug);
       hydrate(published);
       syncRoute(published.slug);
+      await loadBacklinks();
     } catch (e) {
       window.alert(`Publish failed: ${(e as Error).message}`);
     } finally {
       setIsPublishing(false);
+    }
+  };
+
+  /**
+   * Save-button entry point. Intercepts a slug rename that would orphan
+   * existing backlinks — in that case the SlugRenameConfirmModal opens
+   * and the actual save runs only after the editor picks an option.
+   */
+  const save = async () => {
+    const nextSlug = slugChangedAndValid();
+    if (
+      nextSlug &&
+      page?.slug &&
+      backlinks &&
+      backlinks.length > 0
+    ) {
+      setPendingSlugRename({
+        fromSlug: page.slug,
+        toSlug: nextSlug,
+        kind: "save",
+      });
+      return;
+    }
+    await commitSave(false);
+  };
+
+  const publish = async () => {
+    const nextSlug = slugChangedAndValid();
+    if (
+      nextSlug &&
+      page?.slug &&
+      backlinks &&
+      backlinks.length > 0
+    ) {
+      setPendingSlugRename({
+        fromSlug: page.slug,
+        toSlug: nextSlug,
+        kind: "publish",
+      });
+      return;
+    }
+    await commitPublish(false);
+  };
+
+  /** Modal confirmation handler — runs the save/publish the editor just
+   *  approved, with the chosen rewrite flag. */
+  const handleSlugRenameConfirm = async (rewriteBacklinks: boolean) => {
+    if (!pendingSlugRename) return;
+    const kind = pendingSlugRename.kind;
+    setPendingSlugRename(null);
+    if (kind === "publish") {
+      await commitPublish(rewriteBacklinks);
+    } else {
+      await commitSave(rewriteBacklinks);
     }
   };
 
@@ -1120,6 +1286,7 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
               selectedBlock ? (
                 <BlockInspector
                   block={selectedBlock}
+                  currentPageSlug={page.slug}
                   onChange={(patch) =>
                     updateBlock(selectedBlock.id, patch)
                   }
@@ -1414,6 +1581,168 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
                 </div>
                 <div className="field-group">
                   <div className="field-label">
+                    <span>TAGS</span>
+                    <span className="hint">
+                      Press Enter or , to add
+                    </span>
+                  </div>
+                  <TagChipInput
+                    value={tags}
+                    onChange={(next) => {
+                      setTags(next);
+                      setIsDirty(true);
+                    }}
+                    suggestions={tagSuggestions}
+                    placeholder="finance, compliance, …"
+                  />
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 10.5,
+                      color: "var(--text-3)",
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Used to surface this page in the link picker&apos;s
+                    &ldquo;Related pages&rdquo; suggestions on other pages
+                    that share at least one tag. Lowercase + trim is
+                    applied on save.
+                  </div>
+                </div>
+
+                <div className="field-group">
+                  <div className="field-label">
+                    <span>PAGES LINKING HERE</span>
+                    <span className="hint">
+                      {backlinksLoading
+                        ? "Loading…"
+                        : backlinks
+                        ? `${backlinks.length} page${
+                            backlinks.length === 1 ? "" : "s"
+                          }`
+                        : ""}
+                    </span>
+                  </div>
+                  {backlinksError ? (
+                    <div
+                      style={{
+                        padding: 10,
+                        borderRadius: 8,
+                        background: "rgba(255,107,128,.08)",
+                        border: "1px solid rgba(255,107,128,.25)",
+                        color: "#ffb1bd",
+                        fontSize: 11.5,
+                      }}
+                    >
+                      Could not load backlinks: {backlinksError}
+                    </div>
+                  ) : backlinks === null ? (
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "var(--text-3)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Loading…
+                    </div>
+                  ) : backlinks.length === 0 ? (
+                    <div
+                      style={{
+                        fontSize: 11.5,
+                        color: "var(--text-3)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      No other pages link to <strong>/{page.slug}</strong> yet.
+                      When they do, renaming or deleting this page will prompt
+                      you to keep those links working.
+                    </div>
+                  ) : (
+                    <ul
+                      style={{
+                        listStyle: "none",
+                        margin: 0,
+                        padding: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      {backlinks.map((b) => (
+                        <li key={b.slug}>
+                          <Link
+                            href={`/content-pages/${encodeURIComponent(b.slug)}`}
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 4,
+                              padding: "8px 10px",
+                              borderRadius: 8,
+                              border: "1px solid var(--line)",
+                              background: "rgba(255,255,255,.02)",
+                              textDecoration: "none",
+                              color: "inherit",
+                              transition: "background .12s, border-color .12s",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 12.5,
+                                  fontWeight: 500,
+                                  color: "var(--text-1)",
+                                  flex: 1,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {b.title}
+                              </span>
+                              <span
+                                className={`chip ${
+                                  b.status === "published" ? "good" : "warn"
+                                }`}
+                                style={{
+                                  padding: "1px 6px",
+                                  fontSize: 9,
+                                  letterSpacing: ".06em",
+                                }}
+                              >
+                                {b.status === "published" ? "PUB" : "DRAFT"}
+                              </span>
+                            </div>
+                            <span
+                              className="mono"
+                              style={{
+                                fontSize: 10,
+                                color: "var(--text-3)",
+                                letterSpacing: ".06em",
+                              }}
+                            >
+                              /{b.slug} · {b.links.length} link
+                              {b.links.length === 1 ? "" : "s"}
+                              {b.links.length > 0 && b.links[0].anchor
+                                ? ` · "${b.links[0].anchor}${
+                                    b.links.length > 1 ? "…" : ""
+                                  }"`
+                                : ""}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="field-group">
+                  <div className="field-label">
                     <span>FOOTER</span>
                     <span className="hint">Optional</span>
                   </div>
@@ -1638,6 +1967,17 @@ export default function ContentPageEditorView({ slug }: { slug: string }) {
         fetchRevisions={fetchHistory}
         onRestore={handleRestoreHistory}
       />
+
+      <SlugRenameConfirmModal
+        open={pendingSlugRename !== null}
+        fromSlug={pendingSlugRename?.fromSlug ?? ""}
+        toSlug={pendingSlugRename?.toSlug ?? ""}
+        backlinks={backlinks ?? []}
+        intent={pendingSlugRename?.kind ?? "save"}
+        busy={isSaving || isPublishing}
+        onCancel={() => setPendingSlugRename(null)}
+        onConfirm={handleSlugRenameConfirm}
+      />
     </div>
   );
 }
@@ -1689,12 +2029,25 @@ function renderInline(text: string): React.ReactNode {
       // We still mark new-tab links with a tiny visual cue so editors can
       // tell at a glance which links will open externally.
       const newTab = Boolean(m[4]);
+      // Internal `/slug` links resolve against the *public site* (spay-website,
+      // e.g. localhost:3000), not the CMS host the editor runs on
+      // (localhost:3001). Without this prefix, hovering an internal link
+      // shows the wrong URL in the browser status bar and right-click
+      // "Open in new tab" goes to a CMS 404 instead of the live page.
+      const isInternal = m[3].startsWith("/");
+      const resolvedHref = isInternal
+        ? `${PUBLIC_SITE_BASE}${m[3]}`
+        : m[3];
       out.push(
         <a
           key={`a${key++}`}
-          href={m[3]}
+          href={resolvedHref}
           onClick={(e) => e.preventDefault()}
-          title={newTab ? "Opens in a new tab" : undefined}
+          title={
+            newTab
+              ? `${resolvedHref} (opens in a new tab)`
+              : resolvedHref
+          }
           style={{ color: "#46F1C5" }}
         >
           {m[2]}
@@ -2090,10 +2443,14 @@ const toolbarBtnStyle = (disabled: boolean): React.CSSProperties => ({
  */
 function BlockInspector({
   block,
+  currentPageSlug,
   onChange,
   onReplace,
 }: {
   block: ContentBlock;
+  /** Threaded down to the inner editors so their LinkPickerModal can
+   *  ask the backend for related pages by tag overlap. */
+  currentPageSlug: string;
   onChange: (patch: Partial<ContentBlock>) => void;
   onReplace: (next: ContentBlock) => void;
 }) {
@@ -2226,10 +2583,15 @@ function BlockInspector({
             placeholder="Type, or use **bold** and [link](url) for inline formatting."
             rows={4}
             tone="body"
+            currentPageSlug={currentPageSlug}
           />
         )}
         {block.type === "list" && (
-          <ListEditor block={block} onChange={onChange} />
+          <ListEditor
+            block={block}
+            onChange={onChange}
+            currentPageSlug={currentPageSlug}
+          />
         )}
         {block.type === "note" && (
           <TextEditor
@@ -2238,6 +2600,7 @@ function BlockInspector({
             placeholder="Short note — rendered in the accent color on the public page."
             rows={3}
             tone="note"
+            currentPageSlug={currentPageSlug}
           />
         )}
         {block.type === "divider" && (
@@ -2563,9 +2926,12 @@ function HeadingEditor({
 function ListEditor({
   block,
   onChange,
+  currentPageSlug,
 }: {
   block: Extract<ContentBlock, { type: "list" }>;
   onChange: (patch: Partial<ContentBlock>) => void;
+  /** Forwarded to LinkPickerModal for related-pages suggestions. */
+  currentPageSlug?: string;
 }) {
   // Ordered/unordered toggle lives in the Convert popover — the type chip
   // reads "LIST · BULLET" or "LIST · NUMBERED" so the current mode is
@@ -2708,6 +3074,7 @@ function ListEditor({
         initialText={pickerInitial.text}
         initialUrl={pickerInitial.url}
         initialNewTab={pickerInitial.newTab}
+        currentPageSlug={currentPageSlug}
         onClose={() => setPickerIndex(null)}
         onInsert={handleInsert}
       />
@@ -2980,12 +3347,15 @@ function TextEditor({
   placeholder,
   rows,
   tone = "body",
+  currentPageSlug,
 }: {
   value: string;
   onChange: (text: string) => void;
   placeholder?: string;
   rows?: number;
   tone?: "body" | "note";
+  /** Forwarded to LinkPickerModal for related-pages suggestions. */
+  currentPageSlug?: string;
 }) {
   const noteAccent = "#46F1C5";
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -3126,6 +3496,7 @@ function TextEditor({
         initialText={pickerInitial.text}
         initialUrl={pickerInitial.url}
         initialNewTab={pickerInitial.newTab}
+        currentPageSlug={currentPageSlug}
         onClose={() => setPickerOpen(false)}
         onInsert={handleInsert}
       />

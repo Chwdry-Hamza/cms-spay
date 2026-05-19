@@ -5,6 +5,7 @@ import Icon from "@/components/Icon";
 import {
   contentPagesApi,
   type ContentPageSummary,
+  type RelatedContentPage,
 } from "@/lib/content-pages-api";
 
 /**
@@ -45,6 +46,7 @@ export function LinkPickerModal({
   initialText,
   initialUrl,
   initialNewTab,
+  currentPageSlug,
   onClose,
   onInsert,
 }: {
@@ -52,6 +54,11 @@ export function LinkPickerModal({
   initialText: string;
   initialUrl: string;
   initialNewTab: boolean;
+  /** Slug of the page the editor is currently editing. When set, the
+   *  modal asks the backend for related pages (by tag overlap) and
+   *  surfaces them above the full directory. Omit / pass undefined to
+   *  reuse the picker without related suggestions. */
+  currentPageSlug?: string;
   onClose: () => void;
   onInsert: (text: string, url: string, newTab: boolean) => void;
 }) {
@@ -60,6 +67,9 @@ export function LinkPickerModal({
   const [newTab, setNewTab] = React.useState(initialNewTab);
   const [pages, setPages] = React.useState<ContentPageSummary[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [related, setRelated] = React.useState<RelatedContentPage[] | null>(
+    null,
+  );
 
   // Hydrate fields each time the modal opens so each insertion starts from
   // whatever the caller pre-filled (current selection / cursor context).
@@ -89,6 +99,32 @@ export function LinkPickerModal({
       cancelled = true;
     };
   }, [open, pages]);
+
+  // Related-pages suggestions — only fired when the caller tells us which
+  // page is being edited. Refetched whenever the current slug changes so
+  // the suggestions stay accurate after a slug rename. Soft-fails (sets
+  // an empty list) because the absence of suggestions is itself a valid
+  // outcome — e.g. the page has no tags yet.
+  React.useEffect(() => {
+    if (!open || !currentPageSlug) {
+      if (!open) setRelated(null);
+      return;
+    }
+    let cancelled = false;
+    contentPagesApi
+      .listRelated(currentPageSlug)
+      .then(({ related: rows }) => {
+        if (cancelled) return;
+        setRelated(rows);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRelated([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, currentPageSlug]);
 
   // Esc closes the modal.
   React.useEffect(() => {
@@ -128,9 +164,15 @@ export function LinkPickerModal({
         zIndex: 250,
         background: "rgba(2,6,16,.7)",
         backdropFilter: "blur(8px)",
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
+        // Editor's sticky topbar is ~56px; padding-top clears it so the
+        // modal header is never hidden behind it. Bottom padding leaves
+        // breathing room. The container itself stays scrollable so very
+        // tall viewports can still scroll the whole modal into view.
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        padding: "80px 24px 24px",
+        overflowY: "auto",
       }}
       onClick={onClose}
     >
@@ -139,7 +181,11 @@ export function LinkPickerModal({
         style={{
           width: "100%",
           maxWidth: 560,
-          maxHeight: "calc(100vh - 64px)",
+          // Constrain so the modal can never exceed the visible area
+          // between the topbar and the bottom edge — the body section
+          // inside is overflow-auto, so long page lists scroll there
+          // while the header + footer stay anchored.
+          maxHeight: "calc(100vh - 104px)",
           display: "flex",
           flexDirection: "column",
           background:
@@ -203,11 +249,16 @@ export function LinkPickerModal({
           className="nice-scroll"
           style={{
             flex: 1,
+            // Required for the body to actually scroll inside the modal's
+            // maxHeight box instead of pushing the footer offscreen — flex
+            // children default to min-height: auto which refuses to shrink
+            // past content size.
+            minHeight: 0,
             overflowY: "auto",
-            padding: "16px 18px 18px",
+            padding: "14px 18px",
             display: "flex",
             flexDirection: "column",
-            gap: 14,
+            gap: 10,
           }}
         >
           {/* Link text */}
@@ -289,13 +340,191 @@ export function LinkPickerModal({
             />
           </div>
 
+          {/* Related pages — only shown when the caller passed
+              currentPageSlug AND we got at least one match back. Hidden
+              entirely otherwise so editors who haven't tagged anything
+              aren't confronted with an empty section. */}
+          {currentPageSlug && related && related.length > 0 && (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    color: "var(--accent-2)",
+                    letterSpacing: ".1em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Related pages
+                </span>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 9.5,
+                    color: "var(--text-3)",
+                    letterSpacing: ".08em",
+                  }}
+                >
+                  Ranked by shared tags
+                </span>
+              </div>
+              <div
+                style={{
+                  border: "1px solid rgba(4,186,191,.18)",
+                  borderRadius: 10,
+                  background: "rgba(4,186,191,.04)",
+                  maxHeight: 200,
+                  overflowY: "auto",
+                }}
+                className="nice-scroll"
+              >
+                <ul
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                  }}
+                >
+                  {related.map((p) => {
+                    const selected =
+                      url.trim().toLowerCase() === `/${p.slug}`;
+                    return (
+                      <li key={p.slug}>
+                        <button
+                          onClick={() => {
+                            setUrl(`/${p.slug}`);
+                            if (!linkText.trim()) setLinkText(p.title);
+                          }}
+                          style={{
+                            all: "unset",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            width: "100%",
+                            padding: "10px 12px",
+                            cursor: "pointer",
+                            borderBottom:
+                              "1px solid rgba(4,186,191,.10)",
+                            background: selected
+                              ? "rgba(4,186,191,.12)"
+                              : "transparent",
+                            transition: "background .12s",
+                            boxSizing: "border-box",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!selected)
+                              e.currentTarget.style.background =
+                                "rgba(4,186,191,.06)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = selected
+                              ? "rgba(4,186,191,.12)"
+                              : "transparent";
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 7,
+                              background: "rgba(4,186,191,.16)",
+                              color: "var(--accent-2)",
+                              display: "grid",
+                              placeItems: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Icon name="sparkles" size={12} />
+                          </span>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              minWidth: 0,
+                              flex: 1,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 500,
+                                color: "var(--text)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {p.title}
+                            </span>
+                            <span
+                              className="mono"
+                              style={{
+                                fontSize: 10.5,
+                                color: "var(--text-3)",
+                                letterSpacing: ".06em",
+                              }}
+                            >
+                              /{p.slug}
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              padding: "2px 7px",
+                              fontSize: 9.5,
+                              letterSpacing: ".06em",
+                              borderRadius: 999,
+                              background: "rgba(4,186,191,.18)",
+                              color: "var(--accent-2)",
+                              border: "1px solid rgba(4,186,191,.30)",
+                              fontFamily:
+                                "Geist Mono, ui-monospace, monospace",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={`${p.overlap} shared tag${
+                              p.overlap === 1 ? "" : "s"
+                            }${
+                              p.tags.length > 0
+                                ? `: ${p.tags.join(", ")}`
+                                : ""
+                            }`}
+                          >
+                            ×{p.overlap}
+                          </span>
+                          <span
+                            className={`chip ${
+                              p.status === "published" ? "good" : "warn"
+                            }`}
+                            style={{
+                              padding: "2px 8px",
+                              fontSize: 9.5,
+                              letterSpacing: ".06em",
+                            }}
+                          >
+                            {p.status === "published" ? "PUB" : "DRAFT"}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Page directory */}
           <div
             style={{
               border: "1px solid var(--line)",
               borderRadius: 10,
               background: "rgba(255,255,255,.02)",
-              maxHeight: 260,
+              maxHeight: 200,
               overflowY: "auto",
             }}
             className="nice-scroll"

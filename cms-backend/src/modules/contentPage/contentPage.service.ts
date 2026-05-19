@@ -7,6 +7,34 @@ import {
 import { Redirect } from '../../models/Redirect';
 import { recordSlugChange } from '../redirect/redirect.service';
 import { BadRequest, Conflict, NotFound } from '../../utils/errors';
+import {
+  extractInternalLinks,
+  rewriteInternalLinksInBlocks,
+} from './links';
+
+/**
+ * Canonicalize an editor-supplied tag list to the form we store + index:
+ * lowercase, trimmed, internal whitespace collapsed, empty entries
+ * dropped, duplicates removed (case-insensitively, since we lowercase).
+ *
+ * Doing this in one place means the multikey index never has to deal
+ * with "Privacy", "privacy", "privacy " as three different keys, and the
+ * autocomplete query can group cleanly on the literal string.
+ */
+function normalizeTags(input: string[] | undefined): string[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== 'string') continue;
+    const tag = raw.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!tag) continue;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
+}
 
 const REVISION_RETENTION = 50;
 const AUTOSAVE_COALESCE_MS = 30_000;
@@ -133,6 +161,7 @@ export async function createContentPage(input: {
   ogImage?: string | null;
   noindex?: boolean;
   blocks?: IBlock[];
+  tags?: string[];
 }): Promise<ContentPageDoc> {
   const existing = await ContentPage.findOne({ workspaceId: WORKSPACE, slug: input.slug });
   if (existing) throw Conflict(`Content page already exists: ${input.slug}`, 'CONTENT_PAGE_EXISTS');
@@ -141,6 +170,7 @@ export async function createContentPage(input: {
     throw BadRequest('Slug "/" is reserved for the home page.', 'RESERVED_SLUG');
   }
 
+  const blocks = input.blocks ?? [];
   return ContentPage.create({
     workspaceId: WORKSPACE,
     slug: input.slug,
@@ -156,8 +186,10 @@ export async function createContentPage(input: {
     seoKeywords: input.seoKeywords ?? null,
     ogImage: input.ogImage ?? null,
     noindex: input.noindex ?? false,
-    draftBlocks: input.blocks ?? [],
+    draftBlocks: blocks,
     publishedBlocks: null,
+    outgoingLinks: extractInternalLinks(blocks),
+    tags: normalizeTags(input.tags),
     version: 0,
   });
 }
@@ -177,6 +209,7 @@ export async function updateContentPage(
     ogImage?: string | null;
     noindex?: boolean;
     blocks?: IBlock[];
+    tags?: string[];
   },
 ): Promise<ContentPageDoc> {
   const page = await getContentPage(slug);
@@ -216,10 +249,19 @@ export async function updateContentPage(
   if (input.seoKeywords !== undefined) page.seoKeywords = input.seoKeywords;
   if (input.ogImage !== undefined) page.ogImage = input.ogImage;
   if (input.noindex !== undefined) page.noindex = input.noindex;
+  if (input.tags !== undefined) {
+    page.tags = normalizeTags(input.tags);
+    page.markModified('tags');
+  }
   if (input.blocks !== undefined) {
     page.draftBlocks = input.blocks;
     page.markModified('draftBlocks');
   }
+  // Keep the outgoing-link index in sync with the (possibly new) draft
+  // blocks. Cheap to recompute even on field-only updates because it just
+  // walks the existing block array.
+  page.outgoingLinks = extractInternalLinks(page.draftBlocks);
+  page.markModified('outgoingLinks');
   page.isDirty = true;
   page.status = 'draft';
   page.lastSavedAt = new Date();
@@ -319,6 +361,8 @@ export async function discardContentPageDraft(slug: string): Promise<ContentPage
     page.draftBlocks = [];
     page.status = 'draft';
   }
+  page.outgoingLinks = extractInternalLinks(page.draftBlocks);
+  page.markModified('outgoingLinks');
   page.isDirty = false;
   // Discard reverts to the published state, so any pending schedule should
   // also go away — otherwise we'd auto-publish whatever the editor just
@@ -332,6 +376,279 @@ export async function deleteContentPage(slug: string): Promise<void> {
   const page = await getContentPage(slug);
   await ContentPageRevision.deleteMany({ contentPageId: page._id });
   await page.deleteOne();
+}
+
+// ─── Tags + related pages ────────────────────────────────────────────────────
+
+/**
+ * Distinct tag usage across every content page in the workspace. Sorted
+ * by usage count (most popular first), then alphabetic for stable order
+ * when counts tie. Powers the tag-input autocomplete in the editor so
+ * the SEO team doesn't end up with `finance`, `Finance`, `FINANCE`, and
+ * a stray typo all referring to the same concept.
+ *
+ * Capped at 200 rows — the autocomplete dropdown can't show more than
+ * that meaningfully, and unbounded results would scale linearly with
+ * tag soup growth.
+ */
+export async function listAllContentPageTags(): Promise<
+  Array<{ tag: string; usage: number }>
+> {
+  const rows = await ContentPage.aggregate<{
+    _id: string;
+    usage: number;
+  }>([
+    { $match: { workspaceId: WORKSPACE } },
+    { $unwind: '$tags' },
+    { $group: { _id: '$tags', usage: { $sum: 1 } } },
+    { $sort: { usage: -1, _id: 1 } },
+    { $limit: 200 },
+  ]);
+  return rows.map((r) => ({ tag: r._id, usage: r.usage }));
+}
+
+/** Compact representation of a related page returned by the picker. */
+export interface RelatedPageRow {
+  slug: string;
+  title: string;
+  status: 'draft' | 'published';
+  tags: string[];
+  /** How many tags this page shares with the reference page. */
+  overlap: number;
+  updatedAt: Date | null;
+}
+
+/**
+ * Pages most likely to be relevant to internal-link to from the page
+ * with `referenceSlug`. Ranking:
+ *
+ *   1. **Tag overlap** — pages sharing the most tags rank first.
+ *   2. **Recency** — among ties, the most-recently-updated page wins.
+ *
+ * If the reference page has no tags, returns an empty list (no signal to
+ * rank by). Self is filtered out so a page can't recommend itself.
+ */
+export async function listRelatedContentPages(
+  referenceSlug: string,
+  limit = 8,
+): Promise<RelatedPageRow[]> {
+  const ref = await getContentPage(referenceSlug);
+  const refTags = Array.isArray(ref.tags) ? ref.tags : [];
+  if (refTags.length === 0) return [];
+
+  const rows = await ContentPage.aggregate<{
+    slug: string;
+    title: string;
+    status: 'draft' | 'published';
+    tags: string[];
+    overlap: number;
+    updatedAt: Date | null;
+  }>([
+    {
+      $match: {
+        workspaceId: WORKSPACE,
+        slug: { $ne: referenceSlug },
+        tags: { $in: refTags },
+      },
+    },
+    {
+      $addFields: {
+        overlap: {
+          $size: { $setIntersection: ['$tags', refTags] },
+        },
+      },
+    },
+    { $sort: { overlap: -1, updatedAt: -1 } },
+    { $limit: Math.min(50, Math.max(1, limit)) },
+    {
+      $project: {
+        _id: 0,
+        slug: 1,
+        title: 1,
+        status: 1,
+        tags: 1,
+        overlap: 1,
+        updatedAt: 1,
+      },
+    },
+  ]);
+  return rows;
+}
+
+// ─── Backlinks + rename/delete safety ────────────────────────────────────────
+
+/** Lightweight view of a page returned by the backlinks endpoint. */
+export interface BacklinkRow {
+  slug: string;
+  title: string;
+  status: 'draft' | 'published';
+  links: { anchor: string; blockId: string }[];
+}
+
+/**
+ * Find every page whose draft contains at least one internal link pointing
+ * at `slug`. Self-links are filtered out — a page can point to itself
+ * (e.g. an anchor jump) but that doesn't count as a backlink for the
+ * "what will break if I rename/delete this?" question.
+ */
+export async function listContentPageBacklinks(slug: string): Promise<BacklinkRow[]> {
+  // Touch the page first so we 404 cleanly if the slug doesn't exist —
+  // saves the frontend from showing an empty panel on a typo.
+  await getContentPage(slug);
+  const rows = await ContentPage.find({
+    workspaceId: WORKSPACE,
+    'outgoingLinks.targetSlug': slug,
+  })
+    .select('slug title status outgoingLinks')
+    .lean();
+  return rows
+    .filter((p) => p.slug !== slug)
+    .map((p) => ({
+      slug: p.slug,
+      title: p.title,
+      status: p.status,
+      links: (p.outgoingLinks ?? [])
+        .filter((l) => l.targetSlug === slug)
+        .map((l) => ({
+          anchor: l.anchor ?? '',
+          blockId: l.blockId ?? '',
+        })),
+    }));
+}
+
+/**
+ * Rewrite every internal link pointing at `fromSlug` to point at `toSlug`
+ * across every page that contains such a link. Mutates the draft blocks of
+ * each affected page (NOT the published copy — editors still have to
+ * publish to make the change live). Returns one row per page that actually
+ * had a replacement made, including how many links were rewritten on it.
+ *
+ * Called from the slug-rename flow when the editor confirms "rewrite all
+ * backlinks too" — also usable as a standalone admin operation.
+ */
+export async function rewriteInternalLinks(
+  fromSlug: string,
+  toSlug: string,
+): Promise<Array<{ slug: string; title: string; replacements: number }>> {
+  if (fromSlug === toSlug) return [];
+  const candidates = await ContentPage.find({
+    workspaceId: WORKSPACE,
+    'outgoingLinks.targetSlug': fromSlug,
+  });
+  const summary: Array<{ slug: string; title: string; replacements: number }> = [];
+  for (const page of candidates) {
+    if (page.slug === fromSlug) continue; // never rewrite the page being renamed (its blocks belong to it, not the index target)
+    const { blocks, replacements } = rewriteInternalLinksInBlocks(
+      page.draftBlocks,
+      fromSlug,
+      toSlug,
+    );
+    if (replacements === 0) continue;
+    page.draftBlocks = blocks;
+    page.markModified('draftBlocks');
+    page.outgoingLinks = extractInternalLinks(page.draftBlocks);
+    page.markModified('outgoingLinks');
+    page.isDirty = true;
+    page.lastSavedAt = new Date();
+    await page.save();
+    // Snapshot the rewrite in the revision history so editors can see
+    // "rewritten because /about was renamed" if they go looking later.
+    await recordContentRevision(
+      page,
+      'manualSave',
+      `Rewrote ${replacements} link${replacements === 1 ? '' : 's'} from /${fromSlug} to /${toSlug}`,
+    );
+    summary.push({
+      slug: page.slug,
+      title: page.title,
+      replacements,
+    });
+  }
+  return summary;
+}
+
+/**
+ * Delete a content page with backlink protection. Default behaviour is
+ * to *refuse* deletion if any other page links to this one — the
+ * controller surfaces this as a 409 with `code: BACKLINKS_PRESENT` plus
+ * the offending pages so the UI can prompt for a redirect target.
+ *
+ * Pass `redirectTo` to allow the delete by:
+ *   1. Rewriting every page that currently links to this slug so it points
+ *      at the redirect target directly — no redirect hop for internal
+ *      links, which is the SEO-cleanest outcome.
+ *   2. Creating a 308 redirect from this slug to the target — safety net
+ *      for external inbound links (blog posts, search results, etc.) we
+ *      don't know about.
+ *   3. Deleting the page and its revision history.
+ *
+ * Pass `force: true` for an admin-style "delete anyway" path — backlinks
+ * will simply 404 after this until they're rewritten by a human. Neither
+ * the rewrite nor the redirect creation happens in force mode.
+ */
+export async function deleteContentPageSafely(
+  slug: string,
+  opts: { redirectTo?: string | null; force?: boolean } = {},
+): Promise<{
+  deleted: true;
+  redirectCreated: string | null;
+  rewritten: Array<{ slug: string; title: string; replacements: number }>;
+}> {
+  const page = await getContentPage(slug);
+
+  const backlinks = await listContentPageBacklinks(slug);
+
+  let redirectCreated: string | null = null;
+  let rewritten: Array<{
+    slug: string;
+    title: string;
+    replacements: number;
+  }> = [];
+
+  if (opts.redirectTo) {
+    // Validate the redirect target exists (and isn't this same page) so
+    // we don't strand inbound links on a slug that itself 404s.
+    if (opts.redirectTo === slug) {
+      throw BadRequest(
+        'Redirect target cannot be the page being deleted.',
+        'INVALID_REDIRECT_TARGET',
+      );
+    }
+    const target = await ContentPage.findOne({
+      workspaceId: WORKSPACE,
+      slug: opts.redirectTo,
+    })
+      .select('_id')
+      .lean();
+    if (!target) {
+      throw BadRequest(
+        `Redirect target "${opts.redirectTo}" does not exist.`,
+        'INVALID_REDIRECT_TARGET',
+      );
+    }
+    // Rewrite backlinks FIRST so the literal text in every source page
+    // points at the new target. This matches the "Save & rewrite" path
+    // on slug rename and avoids redirect chains on every click. The 308
+    // is still added below as a safety net for inbound links we can't
+    // see (external blogs, search results).
+    if (backlinks.length > 0) {
+      rewritten = await rewriteInternalLinks(slug, opts.redirectTo);
+    }
+    await recordSlugChange(slug, opts.redirectTo);
+    redirectCreated = opts.redirectTo;
+  } else if (backlinks.length > 0 && !opts.force) {
+    throw Conflict(
+      `Cannot delete /${slug}: ${backlinks.length} page${
+        backlinks.length === 1 ? '' : 's'
+      } link to it. Provide a redirect target or pass force=true.`,
+      'BACKLINKS_PRESENT',
+      { backlinks },
+    );
+  }
+
+  await ContentPageRevision.deleteMany({ contentPageId: page._id });
+  await page.deleteOne();
+  return { deleted: true, redirectCreated, rewritten };
 }
 
 // ─── Revision history ────────────────────────────────────────────────────────
@@ -409,6 +726,8 @@ export async function restoreContentPageRevision(
   page.title = s.title;
   page.draftBlocks = s.blocks.map((b) => ({ ...b }));
   page.markModified('draftBlocks');
+  page.outgoingLinks = extractInternalLinks(page.draftBlocks);
+  page.markModified('outgoingLinks');
   page.seoTitle = s.seoTitle ?? null;
   page.seoDescription = s.seoDescription ?? null;
   page.seoKeywords = s.seoKeywords ?? null;
