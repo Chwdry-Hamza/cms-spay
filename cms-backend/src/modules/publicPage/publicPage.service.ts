@@ -11,6 +11,11 @@ export async function getPublishedPage(slug: string) {
   return {
     slug: page.slug,
     title: page.title,
+    seoTitle: page.seoTitle ?? null,
+    seoDescription: page.seoDescription ?? null,
+    seoKeywords: page.seoKeywords ?? null,
+    ogImage: page.ogImage ?? null,
+    noindex: page.noindex ?? false,
     version: page.version,
     publishedAt: page.lastPublishedAt,
     layout: page.publishedLayout

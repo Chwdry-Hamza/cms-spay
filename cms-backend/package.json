@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "tsx src/scripts/seed.ts",
+    "seed:content-pages": "tsx src/scripts/seedContentPages.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

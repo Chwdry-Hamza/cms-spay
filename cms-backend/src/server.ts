@@ -3,6 +3,7 @@ import { connectDb, disconnectDb } from './config/db';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { refreshManifest } from './modules/builder/manifest.service';
+import { startScheduler, stopScheduler } from './modules/contentPage/scheduler';
 
 async function main() {
   await connectDb();
@@ -11,9 +12,11 @@ async function main() {
   const server = app.listen(env.PORT, () => {
     logger.info(`cms-backend listening on http://localhost:${env.PORT}`);
   });
+  startScheduler();
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutting down');
+    stopScheduler();
     server.close(async () => {
       await disconnectDb();
       process.exit(0);

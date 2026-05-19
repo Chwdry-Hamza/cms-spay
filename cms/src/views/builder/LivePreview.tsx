@@ -223,8 +223,8 @@ export const LivePreview = React.forwardRef<
       : 1;
 
   // Iframe height in logical pixels — scaled to the visible canvas so
-  // `position: fixed` overlays (AppHeader, BottomNav, CookieConsent) stay
-  // sticky to the visible area, matching the live site.
+  // `position: fixed` overlays (BottomNav, CookieConsent) stay sticky to the
+  // visible area, matching the live site.
   const logicalHeight =
     stageSize.h > 0 ? Math.round(stageSize.h / fitScale) : 720;
 

@@ -17,6 +17,16 @@ export interface IPage {
   workspaceId: string;
   slug: string;
   title: string;
+  /** SEO `<title>`. Falls back to `title` when empty. */
+  seoTitle: string | null;
+  /** Meta description shown under the title in Google search results. */
+  seoDescription: string | null;
+  /** Comma-separated keywords. */
+  seoKeywords: string | null;
+  /** URL of the Open Graph / Twitter share image (1200×630 recommended). */
+  ogImage: string | null;
+  /** When true, emits `<meta name="robots" content="noindex,nofollow">`. */
+  noindex: boolean;
   status: 'draft' | 'published';
   isDirty: boolean;
   draftLayout: ILayoutItem[];
@@ -53,6 +63,11 @@ const PageSchema = new Schema<IPage>(
     workspaceId: { type: String, required: true, default: 'default', index: true },
     slug: { type: String, required: true },
     title: { type: String, required: true },
+    seoTitle: { type: String, default: null },
+    seoDescription: { type: String, default: null },
+    seoKeywords: { type: String, default: null },
+    ogImage: { type: String, default: null },
+    noindex: { type: Boolean, default: false },
     status: { type: String, enum: ['draft', 'published'], default: 'draft' },
     isDirty: { type: Boolean, default: false },
     draftLayout: { type: [LayoutItemSchema], default: [] },

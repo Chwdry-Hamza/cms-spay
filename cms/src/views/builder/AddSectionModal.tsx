@@ -313,8 +313,8 @@ function PresetGrid({
       {presets.map((p) => {
         const count = countByKey.get(p.key) ?? 0;
         const busy = busyKey === p.key;
-        // Locked types (AppHeader, Footer) stay singletons — adding a 2nd
-        // would conflict with the layout-level singleton subpages depend on.
+        // Locked types (Footer) stay singletons — adding a 2nd would conflict
+        // with the layout-level singleton subpages depend on.
         const disabled = (p.locked && count > 0) || busy;
         return (
           <button

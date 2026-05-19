@@ -6,12 +6,14 @@ import { requestId } from './middleware/requestId';
 import { notFound } from './middleware/notFound';
 import { errorHandler } from './middleware/errorHandler';
 import builderRoutes from './modules/builder/builder.routes';
+import contentPageRoutes from './modules/contentPage/contentPage.routes';
 import previewRoutes from './modules/preview/preview.routes';
 import publicPageRoutes from './modules/publicPage/publicPage.routes';
+import redirectRoutes from './modules/redirect/redirect.routes';
 
 export function createApp() {
   const app = express();
-
+   
   // No security middleware yet (intentionally). Permissive CORS for dev.
   app.use(cors({ origin: true, credentials: true }));
   app.use(requestId);
@@ -26,8 +28,10 @@ export function createApp() {
   app.get('/readyz', (_req, res) => res.json({ ok: true, data: { status: 'ready' } }));
 
   app.use('/api/v1/builder', builderRoutes);
+  app.use('/api/v1/content-pages', contentPageRoutes);
   app.use('/api/v1/preview', previewRoutes);
   app.use('/api/v1/public', publicPageRoutes);
+  app.use('/api/v1/redirects', redirectRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

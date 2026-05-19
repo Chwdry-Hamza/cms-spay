@@ -9,13 +9,15 @@ type NavItem = { id: string; label: string; href: string; icon: IconName; count?
 const NAV_PRIMARY: NavItem[] = [
   { id: "dashboard", label: "Dashboard", href: "/", icon: "dashboard" },
   { id: "builder", label: "Landing Page Builder", href: "/builder", icon: "builder", badge: "LIVE" },
+  { id: "content-pages", label: "Pages", href: "/content-pages", icon: "pages" },
   { id: "sections", label: "Sections", href: "/sections", icon: "layers", count: 13 },
   { id: "media", label: "Media Library", href: "/media", icon: "media" },
 ];
 
 const NAV_SECONDARY: NavItem[] = [
-  
+
   { id: "seo", label: "SEO Settings", href: "/seo-settings", icon: "globe" },
+  { id: "redirects", label: "Redirects", href: "/redirects", icon: "arrow-right" },
   { id: "analytics", label: "Analytics", href: "/analytics", icon: "analytics" },
   { id: "users", label: "Users", href: "/users", icon: "users", count: 8 },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
@@ -27,6 +29,8 @@ function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   if (href === "/builder") return pathname === "/builder" || pathname.startsWith("/builder/");
   if (href === "/sections") return pathname === "/sections" || pathname.startsWith("/sections/");
+  if (href === "/content-pages")
+    return pathname === "/content-pages" || pathname.startsWith("/content-pages/");
   return pathname === href || pathname.startsWith(href + "/");
 }
 

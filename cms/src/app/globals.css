@@ -463,12 +463,32 @@ body.sidebar-mobile .app { grid-template-columns: 1fr; }
 }
 .textarea:focus { border-color: rgba(4,186,191,.5); box-shadow: 0 0 0 4px rgba(4,186,191,.1); }
 
-/* Color swatch */
+/* Color swatch — round chip that displays its current color as the fill.
+   We hide the native color picker chrome and force the inline `background`
+   color set on the element to be what the user actually sees. */
 .swatch {
-  width: 22px; height: 22px; border-radius: 6px;
-  border: 1px solid var(--line);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .08);
+  outline: 1px solid var(--line);
   cursor: pointer;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: transform .12s, box-shadow .12s;
 }
+.swatch:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(4, 186, 191, .15);
+}
+/* Strip the native `<input type="color">` swatch chrome so the element's
+   own `background` color is what shows, edge-to-edge inside the circle. */
+.swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.swatch::-webkit-color-swatch        { border: none; border-radius: 50%; }
+.swatch::-moz-color-swatch           { border: none; border-radius: 50%; }
 
 /* Image picker */
 .image-slot {

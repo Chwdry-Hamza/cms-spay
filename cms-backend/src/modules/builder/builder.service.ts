@@ -173,9 +173,24 @@ export async function createPage(input: {
   return page;
 }
 
-export async function updatePage(slug: string, input: { title?: string }): Promise<PageDoc> {
+export async function updatePage(
+  slug: string,
+  input: {
+    title?: string;
+    seoTitle?: string | null;
+    seoDescription?: string | null;
+    seoKeywords?: string | null;
+    ogImage?: string | null;
+    noindex?: boolean;
+  },
+): Promise<PageDoc> {
   const page = await getPage(slug);
   if (input.title !== undefined) page.title = input.title;
+  if (input.seoTitle !== undefined) page.seoTitle = input.seoTitle;
+  if (input.seoDescription !== undefined) page.seoDescription = input.seoDescription;
+  if (input.seoKeywords !== undefined) page.seoKeywords = input.seoKeywords;
+  if (input.ogImage !== undefined) page.ogImage = input.ogImage;
+  if (input.noindex !== undefined) page.noindex = input.noindex;
   await page.save();
   return page;
 }
@@ -453,11 +468,21 @@ export async function getStatus(slug: string) {
 // ─── Revisions ───────────────────────────────────────────────────────────────
 export async function listRevisions(slug: string, limit = 50) {
   const page = await getPage(slug);
-  return PageRevision.find({ pageId: page._id })
+  const rows = await PageRevision.find({ pageId: page._id })
     .sort({ version: -1 })
     .limit(Math.min(200, Math.max(1, limit)))
     .select('kind version note authorId createdAt')
     .lean();
+  // Normalize `_id` to a string `id` field so clients don't have to
+  // worry about ObjectId serialization quirks.
+  return rows.map((r) => ({
+    id: r._id.toString(),
+    kind: r.kind,
+    version: r.version,
+    note: r.note,
+    authorId: r.authorId ?? null,
+    createdAt: r.createdAt,
+  }));
 }
 
 export async function getRevision(slug: string, revId: string): Promise<PageRevisionDoc> {

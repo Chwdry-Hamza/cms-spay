@@ -23,8 +23,23 @@ export const CreatePageBody = z.object({
 export const UpdatePageBody = z
   .object({
     title: z.string().min(1).max(200).optional(),
+    seoTitle: z.string().max(200).nullable().optional(),
+    seoDescription: z.string().max(500).nullable().optional(),
+    seoKeywords: z.string().max(500).nullable().optional(),
+    ogImage: z.string().max(2000).nullable().optional(),
+    noindex: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.seoTitle !== undefined ||
+      v.seoDescription !== undefined ||
+      v.seoKeywords !== undefined ||
+      v.ogImage !== undefined ||
+      v.noindex !== undefined,
+    'At least one field is required',
+  );
 
 export const ReorderBody = z
   .union([

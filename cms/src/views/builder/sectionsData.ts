@@ -1,16 +1,13 @@
 import type { IconName } from "@/components/Icon";
 
 export type SectionType =
-  | "appHeader"
   | "homeHero"
   | "features"
   | "currencies"
   | "featureGrid"
   | "payment"
   | "transfer"
-  | "earn"
   | "crypto"
-  | "linkedAccounts"
   | "collaborations"
   | "joinUs"
   | "customSection"
@@ -34,25 +31,6 @@ export type SectionMeta = {
 };
 
 export const INITIAL_SECTIONS: SectionMeta[] = [
-  {
-    id: "appHeader",
-    type: "appHeader",
-    name: "App Header",
-    file: "AppHeader.tsx",
-    icon: "header",
-    visible: true,
-    locked: true,
-    description: "Top sticky navigation bar with logo and primary CTA.",
-    data: {
-      logoSrc: "/Spay.png",
-      logoAlt: "Spay",
-      ctaLabel: "GET SPAY APP",
-      ctaUrl: "https://apps.apple.com/app/sicash",
-      ctaMobileLabel: "GET APP",
-      sticky: true,
-      blur: true,
-    },
-  },
   {
     id: "homeHero",
     type: "homeHero",
@@ -230,27 +208,6 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
     },
   },
   {
-    id: "earn",
-    type: "earn",
-    name: "Earn Section",
-    file: "EarnSection.tsx",
-    icon: "trend-up",
-    visible: true,
-    description: "Staking pitch with APR gauge visual.",
-    data: {
-      eyebrow: "EARN WITH SPAY",
-      titleParts: [
-        { text: "MAKE ", color: "#ffffff" },
-        { text: "CRYPTO", color: "#46F1C5" },
-        { text: "\nWORK FOR YOU", color: "#ffffff" },
-      ],
-      subtitle:
-        "Enjoy the crypto staking benefits provided by highly-secured cutting-edge encrypted solutions",
-      apr: "3%",
-      aprLabel: "APR up to",
-    },
-  },
-  {
     id: "crypto",
     type: "crypto",
     name: "Crypto Section",
@@ -270,42 +227,6 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
     },
   },
   {
-    id: "linkedAccounts",
-    type: "linkedAccounts",
-    name: "Linked Accounts",
-    file: "LinkedAccountsSection.tsx",
-    icon: "link",
-    visible: true,
-    description: "Fanned crypto wallet cards with linked-success popup and globe.",
-    data: {
-      eyebrow: "LINKED ACCOUNTS",
-      titleParts: [
-        { text: "USE YOUR OTHER\n", color: "#ffffff" },
-        { text: "CRYPTO ACCOUNTS", color: "#46F1C5" },
-      ],
-      subtitle:
-        "Safely connect your crypto accounts to the app and manage them all from one secure access point.",
-      centerCard: {
-        name: "Alexander Reed",
-        status: "Online",
-        label: "All Accounts",
-        balance: "$23,569",
-      },
-      wallets: [
-        { name: "Alexander Reed", status: "Online", label: "CRYPTO WALLET 2", balance: "$ 8,724" },
-        { name: "Alexander Reed", status: "Online", label: "CRYPTO WALLET 1", balance: "$ 9,824" },
-        { name: "Alexander Reed", status: "Online", label: "CRYPTO WALLET 3", balance: "$ 3,960" },
-        { name: "Alexander Reed", status: "Online", label: "CRYPTO WALLET 4", balance: "$ 5,532" },
-      ],
-      popup: {
-        title: "SUCCESSFUL LINKED",
-        body: "You have successfully connected your external crypto account. Thank you for using us.",
-        ctaLabel: "CHECK IT OUT",
-        ctaUrl: "https://apps.apple.com/app/sicash",
-      },
-    },
-  },
-  {
     id: "collaborations",
     type: "collaborations",
     name: "Collaborations",
@@ -319,11 +240,15 @@ export const INITIAL_SECTIONS: SectionMeta[] = [
         { text: "COLLABORATIONS", color: "#46F1C5" },
       ],
       partners: [
-        { name: "BitGo", icon: "₿" },
-        { name: "FENIGE", icon: "◆" },
-        { name: "INTERCOM", icon: "▦" },
-        { name: "PLAID", icon: "▣" },
-        { name: "QUICKO", icon: "◯" },
+        { name: "BitGo", icon: "₿", subtitle: "" },
+        { name: "FENIGE", icon: "⬡", subtitle: "all about payments" },
+        { name: "INTERCOM", icon: "▥", subtitle: "" },
+        { name: "PLAID", icon: "▦", subtitle: "" },
+        { name: "QUICKO", icon: "((", subtitle: "" },
+        { name: "onfido", icon: "⊡", subtitle: "" },
+        { name: "Verestro™", icon: "", subtitle: "Fintech as a service" },
+        { name: "YAPILY", icon: "", subtitle: "" },
+        { name: "BINARYX", icon: "◆", subtitle: "" },
       ],
     },
   },

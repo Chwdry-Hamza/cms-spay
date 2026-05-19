@@ -16,6 +16,15 @@ const TitlePart = z.object({
 });
 const TitleParts = z.array(TitlePart).min(1).max(20);
 
+/**
+ * Legacy field: pages saved before the per-element `style.headings` refactor
+ * stored a numeric `titleLevel` directly on sections (and on FeatureGrid
+ * tiles). Strict schemas would reject this on every save now, so we accept
+ * any value and ignore it — the renderer reads from `style.headings`
+ * instead. Safe to delete once a one-time DB migration strips the field.
+ */
+const LegacyTitleLevel = z.any().optional();
+
 const ColorHex = z.string().regex(/^#[0-9a-fA-F]{3,8}$/, 'Must be a hex color');
 const AssetUrl = z.string().min(1);
 const Href = z
@@ -67,31 +76,29 @@ const TextColorsZ = z
   })
   .optional();
 
+// SEO: per-slot HTML tag override for every named text element in a section.
+// Map keys are the same slot names used by `text` (e.g. `eyebrow`, `subtitle`,
+// `cardTitle`, `tileTitle`) plus the special key `title` for the main
+// `titleParts` headline. Values are the tag the renderer should emit. `null`
+// or an absent key means "use the section's historical default tag", so
+// existing pages with no `headings` data render unchanged.
+const HeadingTagZ = z.enum(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+const HeadingsZ = z.record(z.string(), HeadingTagZ).optional();
+
 const StyleZ = z
   .object({
     bg: BackgroundZ,
     text: TextColorsZ,
+    headings: HeadingsZ,
   })
   .strict()
   .optional();
-
-export const AppHeaderContent = z
-  .object({
-    logoSrc: AssetUrl,
-    logoAlt: z.string().default(''),
-    ctaLabel: z.string(),
-    ctaUrl: Href,
-    ctaMobileLabel: z.string().default(''),
-    sticky: z.boolean().default(true),
-    blur: z.boolean().default(true),
-    style: StyleZ,
-  })
-  .strict();
 
 export const HomeHeroContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string(),
     mobileSubtitle: z.string().default(''),
     ctaLabel: z.string(),
@@ -108,6 +115,7 @@ export const FeaturesContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     cards: z
       .array(
         z.object({
@@ -130,6 +138,7 @@ export const FeatureGridContent = z
     // New shape — every tile is its own optional sub-object so partial PATCH
     // bodies (which only contain the changed tile) still validate.
     titleParts: TitleParts.optional(),
+    titleLevel: LegacyTitleLevel,
     // Each tile sub-object is `.partial()` so any individual field can be
     // missing — the renderer falls back to defaults. This makes patches that
     // only touch one field per tile (and older partial saves) valid.
@@ -139,6 +148,7 @@ export const FeatureGridContent = z
         title: z.string(),
         body: z.string(),
         badgeText: z.string(),
+        titleLevel: LegacyTitleLevel,
       })
       .partial()
       .strict()
@@ -158,6 +168,7 @@ export const FeatureGridContent = z
         label: z.string(),
         title: z.string(),
         cardImage: AssetUrl,
+        titleLevel: LegacyTitleLevel,
       })
       .partial()
       .strict()
@@ -167,6 +178,7 @@ export const FeatureGridContent = z
         title: z.string(),
         body: z.string(),
         amountText: z.string(),
+        titleLevel: LegacyTitleLevel,
       })
       .partial()
       .strict()
@@ -176,6 +188,7 @@ export const FeatureGridContent = z
         title: z.string(),
         body: z.string(),
         pills: z.array(z.string()).max(6),
+        titleLevel: LegacyTitleLevel,
       })
       .partial()
       .strict()
@@ -186,6 +199,7 @@ export const FeatureGridContent = z
         title: z.string(),
         body: z.string(),
         pills: z.array(z.string()).max(6),
+        titleLevel: LegacyTitleLevel,
       })
       .partial()
       .strict()
@@ -202,6 +216,7 @@ export const PaymentContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string(),
     cardFront: AssetUrl,
     cardBack: AssetUrl,
@@ -214,19 +229,9 @@ export const TransferContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string(),
     mockupImage: AssetUrl,
-    style: StyleZ,
-  })
-  .strict();
-
-export const EarnContent = z
-  .object({
-    eyebrow: z.string().default(''),
-    titleParts: TitleParts,
-    subtitle: z.string(),
-    apr: z.string(),
-    aprLabel: z.string(),
     style: StyleZ,
   })
   .strict();
@@ -235,6 +240,7 @@ export const CryptoContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string(),
     mockupImage: AssetUrl,
     // Legacy field — no longer rendered, but accepted (any array, including
@@ -244,35 +250,18 @@ export const CryptoContent = z
   })
   .strict();
 
-const Wallet = z.object({
-  name: z.string(),
-  status: z.string(),
-  label: z.string(),
-  balance: z.string(),
-});
-
-export const LinkedAccountsContent = z
-  .object({
-    eyebrow: z.string().default(''),
-    titleParts: TitleParts,
-    subtitle: z.string(),
-    centerCard: Wallet,
-    wallets: z.array(Wallet).min(1).max(8),
-    popup: z.object({
-      title: z.string(),
-      body: z.string(),
-      ctaLabel: z.string(),
-      ctaUrl: Href,
-    }),
-    style: StyleZ,
-  })
-  .strict();
-
 export const CollaborationsContent = z
   .object({
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     partners: z
-      .array(z.object({ name: z.string(), icon: z.string() }))
+      .array(
+        z.object({
+          name: z.string(),
+          icon: z.string(),
+          subtitle: z.string().default(''),
+        }),
+      )
       .min(1)
       .max(16),
     style: StyleZ,
@@ -291,6 +280,7 @@ export const CustomSectionContent = z
     layout: z.enum(['text-only', 'image-left', 'image-right']),
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string().default(''),
     imageUrl: z.string().default(''),
     ctaLabel: z.string().default(''),
@@ -303,6 +293,7 @@ export const JoinUsContent = z
   .object({
     eyebrow: z.string().default(''),
     titleParts: TitleParts,
+    titleLevel: LegacyTitleLevel,
     subtitle: z.string(),
     ctaLabel: z.string(),
     ctaUrl: Href,
@@ -325,12 +316,27 @@ export const FooterContent = z
   })
   .strict();
 
+// In-page anchors (#foo) are allowed for BottomNav hrefs because the items
+// jump between sections on the same page.
+const NavHref = z
+  .string()
+  .min(1)
+  .refine(
+    (s) => s.startsWith('/') || s.startsWith('#') || /^https?:\/\//.test(s),
+    'Must be an absolute URL, a "/" path, or a "#anchor"',
+  );
+
 export const BottomNavContent = z
   .object({
+    logoSrc: AssetUrl.default('/Spay.png'),
+    logoAlt: z.string().default('SPay'),
+    ctaLabel: z.string().default('GET SPAY APP'),
+    ctaMobileLabel: z.string().default('GET THE APP'),
+    ctaUrl: Href.default('https://apps.apple.com/app/sicash'),
     items: z
-      .array(z.object({ label: z.string(), icon: z.string(), href: Href }))
-      .min(2)
-      .max(6),
+      .array(z.object({ label: z.string(), icon: z.string(), href: NavHref }))
+      .min(0)
+      .max(8),
     style: StyleZ,
   })
   .strict();
@@ -363,16 +369,13 @@ export const CurrenciesContent = z
   .strict();
 
 const SCHEMAS = {
-  appHeader: AppHeaderContent,
   homeHero: HomeHeroContent,
   features: FeaturesContent,
   featureGrid: FeatureGridContent,
   payment: PaymentContent,
   transfer: TransferContent,
-  earn: EarnContent,
   crypto: CryptoContent,
   currencies: CurrenciesContent,
-  linkedAccounts: LinkedAccountsContent,
   collaborations: CollaborationsContent,
   customSection: CustomSectionContent,
   joinUs: JoinUsContent,

@@ -10,16 +10,13 @@
  */
 
 export type SectionType =
-  | 'appHeader'
   | 'homeHero'
   | 'features'
   | 'currencies'
   | 'featureGrid'
   | 'payment'
   | 'transfer'
-  | 'earn'
   | 'crypto'
-  | 'linkedAccounts'
   | 'collaborations'
   | 'joinUs'
   | 'customSection'
@@ -39,24 +36,6 @@ export interface CatalogueEntry {
 }
 
 export const SECTION_CATALOGUE: CatalogueEntry[] = [
-  {
-    key: 'appHeader',
-    type: 'appHeader',
-    defaultName: 'App Header',
-    defaultFile: 'AppHeader.tsx',
-    defaultIcon: 'header',
-    locked: true,
-    description: 'Top sticky navigation bar with logo and primary CTA.',
-    defaultData: {
-      logoSrc: '/Spay.png',
-      logoAlt: 'Spay',
-      ctaLabel: 'GET SPAY APP',
-      ctaUrl: 'https://apps.apple.com/app/sicash',
-      ctaMobileLabel: 'GET APP',
-      sticky: true,
-      blur: true,
-    },
-  },
   {
     key: 'homeHero',
     type: 'homeHero',
@@ -234,27 +213,6 @@ export const SECTION_CATALOGUE: CatalogueEntry[] = [
     },
   },
   {
-    key: 'earn',
-    type: 'earn',
-    defaultName: 'Earn Section',
-    defaultFile: 'EarnSection.tsx',
-    defaultIcon: 'trend-up',
-    locked: false,
-    description: 'Staking pitch with APR gauge visual.',
-    defaultData: {
-      eyebrow: 'EARN WITH SPAY',
-      titleParts: [
-        { text: 'MAKE ', color: '#ffffff' },
-        { text: 'CRYPTO', color: '#46F1C5' },
-        { text: '\nWORK FOR YOU', color: '#ffffff' },
-      ],
-      subtitle:
-        'Enjoy the crypto staking benefits provided by highly-secured cutting-edge encrypted solutions',
-      apr: '3%',
-      aprLabel: 'APR up to',
-    },
-  },
-  {
     key: 'crypto',
     type: 'crypto',
     defaultName: 'Crypto Section',
@@ -274,42 +232,6 @@ export const SECTION_CATALOGUE: CatalogueEntry[] = [
     },
   },
   {
-    key: 'linkedAccounts',
-    type: 'linkedAccounts',
-    defaultName: 'Linked Accounts',
-    defaultFile: 'LinkedAccountsSection.tsx',
-    defaultIcon: 'link',
-    locked: false,
-    description: 'Fanned crypto wallet cards with linked-success popup and globe.',
-    defaultData: {
-      eyebrow: 'LINKED ACCOUNTS',
-      titleParts: [
-        { text: 'USE YOUR OTHER\n', color: '#ffffff' },
-        { text: 'CRYPTO ACCOUNTS', color: '#46F1C5' },
-      ],
-      subtitle:
-        'Safely connect your crypto accounts to the app and manage them all from one secure access point.',
-      centerCard: {
-        name: 'Alexander Reed',
-        status: 'Online',
-        label: 'All Accounts',
-        balance: '$23,569',
-      },
-      wallets: [
-        { name: 'Alexander Reed', status: 'Online', label: 'CRYPTO WALLET 2', balance: '$ 8,724' },
-        { name: 'Alexander Reed', status: 'Online', label: 'CRYPTO WALLET 1', balance: '$ 9,824' },
-        { name: 'Alexander Reed', status: 'Online', label: 'CRYPTO WALLET 3', balance: '$ 3,960' },
-        { name: 'Alexander Reed', status: 'Online', label: 'CRYPTO WALLET 4', balance: '$ 5,532' },
-      ],
-      popup: {
-        title: 'SUCCESSFUL LINKED',
-        body: 'You have successfully connected your external crypto account. Thank you for using us.',
-        ctaLabel: 'CHECK IT OUT',
-        ctaUrl: 'https://apps.apple.com/app/sicash',
-      },
-    },
-  },
-  {
     key: 'collaborations',
     type: 'collaborations',
     defaultName: 'Collaborations',
@@ -323,11 +245,15 @@ export const SECTION_CATALOGUE: CatalogueEntry[] = [
         { text: 'COLLABORATIONS', color: '#46F1C5' },
       ],
       partners: [
-        { name: 'BitGo', icon: '₿' },
-        { name: 'FENIGE', icon: '◆' },
-        { name: 'INTERCOM', icon: '▦' },
-        { name: 'PLAID', icon: '▣' },
-        { name: 'QUICKO', icon: '◯' },
+        { name: 'BitGo', icon: '₿', subtitle: '' },
+        { name: 'FENIGE', icon: '⬡', subtitle: 'all about payments' },
+        { name: 'INTERCOM', icon: '▥', subtitle: '' },
+        { name: 'PLAID', icon: '▦', subtitle: '' },
+        { name: 'QUICKO', icon: '((', subtitle: '' },
+        { name: 'onfido', icon: '⊡', subtitle: '' },
+        { name: 'Verestro™', icon: '', subtitle: 'Fintech as a service' },
+        { name: 'YAPILY', icon: '', subtitle: '' },
+        { name: 'BINARYX', icon: '◆', subtitle: '' },
       ],
     },
   },
@@ -410,13 +336,17 @@ export const SECTION_CATALOGUE: CatalogueEntry[] = [
     defaultFile: 'BottomNav.tsx',
     defaultIcon: 'mobile',
     locked: false,
-    description: 'Mobile-only persistent action bar.',
+    description: 'Sticky floating bar — logo, in-page nav items, and a CTA.',
     defaultData: {
+      logoSrc: '/Spay.png',
+      logoAlt: 'SPay',
+      ctaLabel: 'GET SPAY APP',
+      ctaMobileLabel: 'GET THE APP',
+      ctaUrl: 'https://apps.apple.com/app/sicash',
       items: [
-        { label: 'Home', icon: 'dashboard', href: '/' },
-        { label: 'Card', icon: 'card', href: '/payment' },
-        { label: 'Transfer', icon: 'arrow-right', href: '/transfer' },
-        { label: 'Earn', icon: 'trend-up', href: '/earn' },
+        { label: 'How to pay', icon: 'card', href: '#payment' },
+        { label: 'Send', icon: 'arrow-right', href: '#transfer' },
+        { label: 'Crypto', icon: 'branch', href: '#crypto' },
       ],
     },
   },

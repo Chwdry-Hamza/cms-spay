@@ -29,6 +29,11 @@ export type BackendPage = {
   workspaceId: string;
   slug: string;
   title: string;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  seoKeywords: string | null;
+  ogImage: string | null;
+  noindex: boolean;
   status: "draft" | "published";
   isDirty: boolean;
   draftLayout: BackendLayoutItem[];
@@ -114,6 +119,22 @@ export const builderApi = {
   getPage: (slug: string = SLUG) =>
     request<{ page: BackendPage }>(`/api/v1/builder/pages/${slugPath(slug)}`),
 
+  updatePage: (
+    body: {
+      title?: string;
+      seoTitle?: string | null;
+      seoDescription?: string | null;
+      seoKeywords?: string | null;
+      ogImage?: string | null;
+      noindex?: boolean;
+    },
+    slug: string = SLUG,
+  ) =>
+    request<{ page: BackendPage }>(`/api/v1/builder/pages/${slugPath(slug)}`, {
+      method: "PATCH",
+      json: body,
+    }),
+
   getStatus: (slug: string = SLUG) =>
     request<StatusResponse>(`/api/v1/builder/pages/${slugPath(slug)}/status`),
 
@@ -193,6 +214,26 @@ export const builderApi = {
   discardDraft: (slug: string = SLUG) =>
     request<{ page: BackendPage }>(
       `/api/v1/builder/pages/${slugPath(slug)}/discard-draft`,
+      { method: "POST" },
+    ),
+
+  listRevisions: (slug: string = SLUG) =>
+    request<{
+      revisions: Array<{
+        id: string;
+        kind: "autosave" | "manualSave" | "publish";
+        version: number;
+        note: string;
+        authorId: string | null;
+        createdAt: string;
+      }>;
+    }>(`/api/v1/builder/pages/${slugPath(slug)}/revisions`),
+
+  restoreRevision: (revisionId: string, slug: string = SLUG) =>
+    request<{ layout: BackendLayoutItem[]; isDirty: boolean }>(
+      `/api/v1/builder/pages/${slugPath(slug)}/revisions/${encodeURIComponent(
+        revisionId,
+      )}/restore`,
       { method: "POST" },
     ),
 };

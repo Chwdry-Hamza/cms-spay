@@ -1,11 +1,13 @@
 "use client";
 import * as React from "react";
 import Icon from "@/components/Icon";
+import { HistoryPanel } from "@/components/HistoryPanel";
 import { type SectionMeta, type SectionType } from "./builder/sectionsData";
 import { SectionInspector } from "./builder/inspectors";
 import { LivePreview, type LivePreviewHandle, type Viewport } from "./builder/LivePreview";
 import { AddSectionModal } from "./builder/AddSectionModal";
-import { builderApi, type BackendLayoutItem } from "@/lib/builder-api";
+import { PageSeoModal } from "./builder/PageSeoModal";
+import { builderApi, type BackendLayoutItem, type BackendPage } from "@/lib/builder-api";
 
 type Layout = "mobile" | "tablet" | "desktop";
 
@@ -42,6 +44,20 @@ export default function BuilderView() {
   const [isPublishing, setIsPublishing] = React.useState(false);
   const [inspectorTab, setInspectorTab] = React.useState<"content" | "style">("content");
   const [isAddOpen, setIsAddOpen] = React.useState(false);
+  const [isSeoOpen, setIsSeoOpen] = React.useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
+  // Page-level metadata (separate from layout state) so the SEO modal has
+  // something to hydrate from without re-fetching the page.
+  const [pageMeta, setPageMeta] = React.useState<Pick<
+    BackendPage,
+    | "slug"
+    | "title"
+    | "seoTitle"
+    | "seoDescription"
+    | "seoKeywords"
+    | "ogImage"
+    | "noindex"
+  > | null>(null);
 
   // Initial load from the backend.
   React.useEffect(() => {
@@ -58,6 +74,15 @@ export default function BuilderView() {
         setSelectedId(mapped[0]?.id ?? "");
         setStatus(page.status);
         setIsDirty(page.isDirty);
+        setPageMeta({
+          slug: page.slug,
+          title: page.title,
+          seoTitle: page.seoTitle ?? null,
+          seoDescription: page.seoDescription ?? null,
+          seoKeywords: page.seoKeywords ?? null,
+          ogImage: page.ogImage ?? null,
+          noindex: page.noindex ?? false,
+        });
         setIsLoaded(true);
       })
       .catch((err: Error) => {
@@ -242,6 +267,59 @@ export default function BuilderView() {
         .catch((err) => console.error("[builder] reorder failed", err));
     }
   };
+
+  const removeSection = React.useCallback(async (id: string) => {
+    const target = sectionsRef.current.find((s) => s.id === id);
+    if (!target?.instanceId) return;
+    if (target.locked) {
+      window.alert("This section is locked and cannot be deleted.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete the "${target.name}" section? This is part of the current draft and can be undone with "Discard" until you publish.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await builderApi.deleteSection(target.instanceId);
+      const next = sectionsRef.current.filter((s) => s.id !== id);
+      setSections(next);
+      // Drop any pending edits for the removed section.
+      delete pendingPatchesRef.current[id];
+      setHasPendingEdits(Object.keys(pendingPatchesRef.current).length > 0);
+      // If the deleted row was selected, pick a sensible neighbour.
+      if (selectedId === id) {
+        const fallback = next[0]?.id ?? "";
+        setSelectedId(fallback);
+      }
+      setIsDirty(true);
+      setStatus("draft");
+      // Keep the iframe in sync — hide the removed section immediately and
+      // refresh the customSection list (used by the iframe's renderer).
+      previewRef.current?.send({
+        type: "PREVIEW_VISIBILITY",
+        payload: { id, visible: false },
+      });
+      const customInstances = next
+        .filter((s) => s.type === "customSection")
+        .map((s) => s.id);
+      previewRef.current?.send({
+        type: "PREVIEW_LAYOUT",
+        payload: { customInstances },
+      });
+    } catch (err) {
+      const apiErr = err as { code?: string; message?: string };
+      // eslint-disable-next-line no-console
+      console.error("[builder] delete failed", err);
+      window.alert(
+        apiErr.code === "SECTION_LOCKED"
+          ? "This section is locked and cannot be deleted."
+          : `Delete failed: ${apiErr.message ?? "unknown error"}`,
+      );
+    }
+  }, [selectedId]);
 
   const handleSectionAdded = React.useCallback(
     async (sectionKey: string) => {
@@ -429,6 +507,8 @@ export default function BuilderView() {
         onSaveDraft={saveDraft}
         onPublish={publishPage}
         onDiscardDraft={discardDraft}
+        onOpenSeo={() => setIsSeoOpen(true)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         isSaving={isSaving}
         isPublishing={isPublishing}
         isDiscarding={isDiscarding}
@@ -460,6 +540,21 @@ export default function BuilderView() {
           </div>
 
           <div className="pane-body dense nice-scroll">
+            <button
+              className="btn"
+              style={{
+                width: "100%",
+                justifyContent: "center",
+                marginBottom: 10,
+                borderStyle: "dashed",
+                color: "var(--accent-2)",
+              }}
+              onClick={() => setIsAddOpen(true)}
+            >
+              <Icon name="plus" size={12} />
+              Add new section
+            </button>
+
             {sections.map((s) => {
               const active = s.id === selectedId;
               return (
@@ -507,35 +602,48 @@ export default function BuilderView() {
                     <span className="name">{s.name}</span>
                     <span className="file">{s.file}</span>
                   </span>
-                  <button
-                    className="btn icon ghost"
-                    title={s.visible ? "Hide" : "Show"}
-                    style={{ width: 26, height: 26 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleVisible(s.id);
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      flexShrink: 0,
                     }}
                   >
-                    <Icon name={s.visible ? "eye" : "eye-off"} size={12} />
-                  </button>
+                    <button
+                      className="btn icon ghost"
+                      title={s.visible ? "Hide" : "Show"}
+                      style={{ width: 24, height: 24, padding: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleVisible(s.id);
+                      }}
+                    >
+                      <Icon name={s.visible ? "eye" : "eye-off"} size={12} />
+                    </button>
+                    <button
+                      className="btn icon ghost"
+                      title={s.locked ? "Locked sections can't be deleted" : "Delete section"}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        padding: 0,
+                        opacity: s.locked ? 0.3 : 1,
+                        cursor: s.locked ? "not-allowed" : "pointer",
+                      }}
+                      disabled={s.locked}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!s.locked) removeSection(s.id);
+                      }}
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
 
-            <button
-              className="btn"
-              style={{
-                width: "100%",
-                justifyContent: "center",
-                marginTop: 12,
-                borderStyle: "dashed",
-                color: "var(--accent-2)",
-              }}
-              onClick={() => setIsAddOpen(true)}
-            >
-              <Icon name="plus" size={12} />
-              Add new section
-            </button>
           </div>
         </aside>
 
@@ -656,6 +764,72 @@ export default function BuilderView() {
         onClose={() => setIsAddOpen(false)}
         onAdded={handleSectionAdded}
       />
+
+      <PageSeoModal
+        open={isSeoOpen}
+        page={pageMeta}
+        onClose={() => setIsSeoOpen(false)}
+        onSaved={(updated) => {
+          setPageMeta({
+            slug: updated.slug,
+            title: updated.title,
+            seoTitle: updated.seoTitle ?? null,
+            seoDescription: updated.seoDescription ?? null,
+            seoKeywords: updated.seoKeywords ?? null,
+            ogImage: updated.ogImage ?? null,
+            noindex: updated.noindex ?? false,
+          });
+        }}
+      />
+
+      <HistoryPanel
+        open={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        fetchRevisions={async () => {
+          const { revisions } = await builderApi.listRevisions();
+          return revisions.map((r) => ({
+            id: r.id,
+            kind: r.kind,
+            version: r.version,
+            note: r.note,
+            authorId: r.authorId,
+            createdAt: r.createdAt,
+          }));
+        }}
+        onRestore={async (revisionId) => {
+          // Discard any pending in-flight edits — the restore is going to
+          // replace the entire draft layout anyway, and keeping a stale
+          // diff staged would re-clobber the restored state on next save.
+          pendingPatchesRef.current = {};
+          setHasPendingEdits(false);
+          const { layout } = await builderApi.restoreRevision(revisionId);
+          const mapped = layout.map(mapBackendItem);
+          setSections(mapped);
+          baselineSectionsRef.current = mapped.map((s) => ({
+            ...s,
+            data: { ...s.data },
+          }));
+          setIsDirty(true);
+          // Push the restored content into the live preview so the iframe
+          // updates immediately rather than waiting for a save.
+          for (const s of mapped) {
+            previewRef.current?.send({
+              type: "PREVIEW_PATCH",
+              payload: { id: s.id, data: s.data },
+            });
+          }
+          previewRef.current?.send({
+            type: "PREVIEW_LAYOUT",
+            payload: {
+              layout: mapped.map((s) => ({
+                instanceId: s.id,
+                sectionKey: s.type,
+                name: s.name,
+              })),
+            },
+          });
+        }}
+      />
     </div>
   );
 }
@@ -677,6 +851,8 @@ function BuilderTopbar({
   onSaveDraft,
   onPublish,
   onDiscardDraft,
+  onOpenSeo,
+  onOpenHistory,
   isSaving,
   isPublishing,
   isDiscarding,
@@ -698,6 +874,8 @@ function BuilderTopbar({
   onSaveDraft: () => void;
   onPublish: () => void;
   onDiscardDraft: () => void;
+  onOpenSeo: () => void;
+  onOpenHistory: () => void;
   isSaving: boolean;
   isPublishing: boolean;
   isDiscarding: boolean;
@@ -782,6 +960,24 @@ function BuilderTopbar({
           >
             <Icon name={showOutlines ? "eye" : "eye-off"} size={12} />
             Outlines
+          </button>
+          <button
+            className="btn"
+            style={{ padding: "7px 10px", fontSize: 12 }}
+            onClick={onOpenSeo}
+            title="Edit SEO metadata for the home page"
+          >
+            <Icon name="globe" size={12} />
+            SEO
+          </button>
+          <button
+            className="btn"
+            style={{ padding: "7px 10px", fontSize: 12 }}
+            onClick={onOpenHistory}
+            title="View revision history"
+          >
+            <Icon name="history" size={12} />
+            History
           </button>
         </div>
       )}

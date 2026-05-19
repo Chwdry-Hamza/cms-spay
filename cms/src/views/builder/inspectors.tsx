@@ -215,34 +215,6 @@ function TitlePartsEditor({
 
 /* ---------- Section-specific inspector forms ---------- */
 
-function AppHeaderInspector({ d, patch }: { d: any; patch: Patch }) {
-  return (
-    <>
-      <FieldGroup label="Logo" hint="PNG · SVG">
-        <ImageSlot src={d.logoSrc} onChange={(v) => patch({ logoSrc: v })} />
-        <div style={{ marginTop: 8 }}>
-          <TextInput value={d.logoAlt} onChange={(v: string) => patch({ logoAlt: v })} placeholder="Alt text" />
-        </div>
-      </FieldGroup>
-      <FieldGroup label="Primary CTA">
-        <TextInput value={d.ctaLabel} onChange={(v: string) => patch({ ctaLabel: v })} placeholder="Button label" />
-        <div style={{ marginTop: 8 }}>
-          <TextInput value={d.ctaUrl} onChange={(v: string) => patch({ ctaUrl: v })} placeholder="https://..." />
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <TextInput value={d.ctaMobileLabel} onChange={(v: string) => patch({ ctaMobileLabel: v })} placeholder="Mobile label (shorter)" />
-        </div>
-      </FieldGroup>
-      <FieldGroup label="Behavior">
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <Toggle on={d.sticky} onChange={(v) => patch({ sticky: v })} label="Stick to top on scroll" />
-          <Toggle on={d.blur} onChange={(v) => patch({ blur: v })} label="Background blur" />
-        </div>
-      </FieldGroup>
-    </>
-  );
-}
-
 function HomeHeroInspector({ d, patch }: { d: any; patch: Patch }) {
   return (
     <>
@@ -624,33 +596,6 @@ function TransferInspector({ d, patch }: { d: any; patch: Patch }) {
   );
 }
 
-function EarnInspector({ d, patch }: { d: any; patch: Patch }) {
-  return (
-    <>
-      <FieldGroup label="Eyebrow">
-        <TextInput value={d.eyebrow} onChange={(v: string) => patch({ eyebrow: v })} />
-      </FieldGroup>
-      <FieldGroup label="Title">
-        <TitlePartsEditor parts={d.titleParts} onChange={(v) => patch({ titleParts: v })} />
-      </FieldGroup>
-      <FieldGroup label="Subtitle">
-        <TextArea value={d.subtitle} onChange={(v: string) => patch({ subtitle: v })} rows={3} />
-      </FieldGroup>
-      <FieldGroup label="APR Gauge">
-        <div style={{ display: "flex", gap: 8 }}>
-          <TextInput
-            value={d.aprLabel}
-            onChange={(v: string) => patch({ aprLabel: v })}
-            placeholder="Label"
-            style={{ flex: 1.5 }}
-          />
-          <TextInput value={d.apr} onChange={(v: string) => patch({ apr: v })} placeholder="3%" style={{ flex: 1 }} />
-        </div>
-      </FieldGroup>
-    </>
-  );
-}
-
 function CryptoInspector({ d, patch }: { d: any; patch: Patch }) {
   return (
     <>
@@ -766,154 +711,6 @@ function CurrenciesInspector({ d, patch }: { d: any; patch: Patch }) {
   );
 }
 
-function LinkedAccountsInspector({ d, patch }: { d: any; patch: Patch }) {
-  return (
-    <>
-      <FieldGroup label="Eyebrow">
-        <TextInput value={d.eyebrow} onChange={(v: string) => patch({ eyebrow: v })} />
-      </FieldGroup>
-      <FieldGroup label="Title">
-        <TitlePartsEditor parts={d.titleParts} onChange={(v) => patch({ titleParts: v })} />
-      </FieldGroup>
-      <FieldGroup label="Subtitle">
-        <TextArea value={d.subtitle} onChange={(v: string) => patch({ subtitle: v })} rows={3} />
-      </FieldGroup>
-      <FieldGroup label="Center card · All Accounts" hint="LIGHT">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <TextInput
-            value={d.centerCard.name}
-            onChange={(v: string) => patch({ centerCard: { ...d.centerCard, name: v } })}
-            placeholder="Cardholder name"
-          />
-          <div style={{ display: "flex", gap: 6 }}>
-            <TextInput
-              value={d.centerCard.status}
-              onChange={(v: string) => patch({ centerCard: { ...d.centerCard, status: v } })}
-              placeholder="Status"
-            />
-            <TextInput
-              value={d.centerCard.label}
-              onChange={(v: string) => patch({ centerCard: { ...d.centerCard, label: v } })}
-              placeholder="Label"
-            />
-          </div>
-          <TextInput
-            value={d.centerCard.balance}
-            onChange={(v: string) => patch({ centerCard: { ...d.centerCard, balance: v } })}
-            placeholder="$23,569"
-          />
-        </div>
-      </FieldGroup>
-      <FieldGroup label="Crypto wallet cards" hint={`${(d.wallets || []).length} cards`}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {(d.wallets || []).map((w: any, i: number) => (
-            <div
-              key={i}
-              style={{
-                padding: 10,
-                border: "1px solid var(--line)",
-                borderRadius: 10,
-                background: "rgba(4,186,191,.04)",
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-                position: "relative",
-              }}
-            >
-              <span
-                className="mono"
-                style={{
-                  position: "absolute",
-                  top: -8,
-                  left: 8,
-                  fontSize: 9,
-                  color: "var(--accent-2)",
-                  background: "var(--bg)",
-                  padding: "0 6px",
-                  letterSpacing: ".1em",
-                }}
-              >
-                CARD {i + 1}
-              </span>
-              <button
-                className="btn icon ghost"
-                style={{ position: "absolute", top: 4, right: 4, width: 22, height: 22 }}
-                onClick={() => patch({ wallets: d.wallets.filter((_: any, ix: number) => ix !== i) })}
-              >
-                <Icon name="x" size={11} />
-              </button>
-              <TextInput
-                value={w.name}
-                onChange={(v: string) => {
-                  const next = [...d.wallets];
-                  next[i] = { ...w, name: v };
-                  patch({ wallets: next });
-                }}
-                placeholder="Cardholder"
-              />
-              <div style={{ display: "flex", gap: 6 }}>
-                <TextInput
-                  value={w.status}
-                  onChange={(v: string) => {
-                    const next = [...d.wallets];
-                    next[i] = { ...w, status: v };
-                    patch({ wallets: next });
-                  }}
-                  placeholder="Status"
-                />
-                <TextInput
-                  value={w.label}
-                  onChange={(v: string) => {
-                    const next = [...d.wallets];
-                    next[i] = { ...w, label: v };
-                    patch({ wallets: next });
-                  }}
-                  placeholder="CRYPTO WALLET"
-                />
-              </div>
-              <TextInput
-                value={w.balance}
-                onChange={(v: string) => {
-                  const next = [...d.wallets];
-                  next[i] = { ...w, balance: v };
-                  patch({ wallets: next });
-                }}
-                placeholder="$ 9,824"
-              />
-            </div>
-          ))}
-        </div>
-      </FieldGroup>
-      <FieldGroup label="Successful linked popup">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <TextInput
-            value={d.popup.title}
-            onChange={(v: string) => patch({ popup: { ...d.popup, title: v } })}
-            placeholder="SUCCESSFUL LINKED"
-          />
-          <TextArea
-            value={d.popup.body}
-            onChange={(v: string) => patch({ popup: { ...d.popup, body: v } })}
-            rows={2}
-          />
-          <div style={{ display: "flex", gap: 6 }}>
-            <TextInput
-              value={d.popup.ctaLabel}
-              onChange={(v: string) => patch({ popup: { ...d.popup, ctaLabel: v } })}
-              placeholder="CHECK IT OUT"
-            />
-            <TextInput
-              value={d.popup.ctaUrl}
-              onChange={(v: string) => patch({ popup: { ...d.popup, ctaUrl: v } })}
-              placeholder="https://..."
-            />
-          </div>
-        </div>
-      </FieldGroup>
-    </>
-  );
-}
-
 function CollaborationsInspector({ d, patch }: { d: any; patch: Patch }) {
   return (
     <>
@@ -921,38 +718,52 @@ function CollaborationsInspector({ d, patch }: { d: any; patch: Patch }) {
         <TitlePartsEditor parts={d.titleParts} onChange={(v) => patch({ titleParts: v })} />
       </FieldGroup>
       <FieldGroup label="Partners" hint={`${d.partners.length} partners`}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {d.partners.map((p: any, i: number) => (
-            <div key={i} style={{ display: "flex", gap: 6 }}>
-              <input
-                className="input small mono"
-                value={p.icon}
-                onChange={(e) => {
-                  const next = [...d.partners];
-                  next[i] = { ...p, icon: e.target.value };
-                  patch({ partners: next });
-                }}
-                style={{ width: 50, textAlign: "center" }}
-              />
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  className="input small mono"
+                  value={p.icon}
+                  placeholder="icon"
+                  onChange={(e) => {
+                    const next = [...d.partners];
+                    next[i] = { ...p, icon: e.target.value };
+                    patch({ partners: next });
+                  }}
+                  style={{ width: 50, textAlign: "center" }}
+                />
+                <input
+                  className="input small"
+                  value={p.name}
+                  onChange={(e) => {
+                    const next = [...d.partners];
+                    next[i] = { ...p, name: e.target.value };
+                    patch({ partners: next });
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <button className="btn icon ghost" onClick={() => patch({ partners: d.partners.filter((_: any, ix: number) => ix !== i) })}>
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
               <input
                 className="input small"
-                value={p.name}
+                value={p.subtitle ?? ""}
+                placeholder="Subtitle (optional)"
                 onChange={(e) => {
                   const next = [...d.partners];
-                  next[i] = { ...p, name: e.target.value };
+                  next[i] = { ...p, subtitle: e.target.value };
                   patch({ partners: next });
                 }}
-                style={{ flex: 1 }}
+                style={{ marginLeft: 56 }}
               />
-              <button className="btn icon ghost" onClick={() => patch({ partners: d.partners.filter((_: any, ix: number) => ix !== i) })}>
-                <Icon name="x" size={12} />
-              </button>
             </div>
           ))}
           <button
             className="btn"
             style={{ justifyContent: "center", borderStyle: "dashed", color: "var(--accent-2)" }}
-            onClick={() => patch({ partners: [...d.partners, { icon: "★", name: "Partner" }] })}
+            onClick={() => patch({ partners: [...d.partners, { icon: "★", name: "Partner", subtitle: "" }] })}
           >
             <Icon name="plus" size={12} />
             Add partner
@@ -1086,51 +897,249 @@ function FooterInspector({ d, patch }: { d: any; patch: Patch }) {
   );
 }
 
+// Icons offered in the BottomNav inspector. Each entry's `key` must also have
+// a matching renderer in spay-website's BottomNav.tsx `NAV_ICONS` registry.
+const NAV_ICON_OPTIONS: Array<{ key: string; iconName: any }> = [
+  { key: "card", iconName: "card" },
+  { key: "arrow-right", iconName: "arrow-right" },
+  { key: "branch", iconName: "branch" },
+  { key: "trend-up", iconName: "trend-up" },
+  { key: "dashboard", iconName: "dashboard" },
+  { key: "globe", iconName: "globe" },
+  { key: "sparkles", iconName: "sparkles" },
+  { key: "rocket", iconName: "rocket" },
+  { key: "link", iconName: "link" },
+  { key: "mobile", iconName: "mobile" },
+  { key: "grid", iconName: "grid" },
+  { key: "wand", iconName: "wand" },
+];
+
 function BottomNavInspector({ d, patch }: { d: any; patch: Patch }) {
+  const items: Array<{ label: string; icon: string; href: string }> = d.items ?? [];
+  const maxItems = 8;
+
+  const updateItem = (i: number, fields: Partial<{ label: string; icon: string; href: string }>) => {
+    const next = [...items];
+    next[i] = { ...next[i], ...fields };
+    patch({ items: next });
+  };
+  const removeItem = (i: number) => {
+    patch({ items: items.filter((_, j) => j !== i) });
+  };
+  const moveItem = (i: number, dir: -1 | 1) => {
+    const target = i + dir;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    [next[i], next[target]] = [next[target], next[i]];
+    patch({ items: next });
+  };
+  const addItem = () => {
+    if (items.length >= maxItems) return;
+    patch({
+      items: [
+        ...items,
+        { label: "New tab", icon: "card", href: "#" },
+      ],
+    });
+  };
+
   return (
-    <FieldGroup label="Items" hint={`${d.items.length} tabs`}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {d.items.map((it: any, i: number) => (
-          <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <>
+      <FieldGroup label="Logo">
+        <ImageSlot src={d.logoSrc ?? ""} onChange={(v) => patch({ logoSrc: v })} />
+        <div style={{ marginTop: 6 }}>
+          <TextInput
+            value={d.logoAlt}
+            onChange={(v: string) => patch({ logoAlt: v })}
+            placeholder="Alt text"
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup label="Call-to-action button">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <TextInput
+            value={d.ctaLabel}
+            onChange={(v: string) => patch({ ctaLabel: v })}
+            placeholder="Desktop label (e.g. GET SPAY APP)"
+          />
+          <TextInput
+            value={d.ctaMobileLabel}
+            onChange={(v: string) => patch({ ctaMobileLabel: v })}
+            placeholder="Mobile label (e.g. GET THE APP)"
+          />
+          <TextInput
+            value={d.ctaUrl}
+            onChange={(v: string) => patch({ ctaUrl: v })}
+            placeholder="URL — https://… or /path"
+          />
+        </div>
+      </FieldGroup>
+
+      <FieldGroup
+        label="Items"
+        hint={`${items.length} / ${maxItems}`}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.length === 0 && (
             <div
               style={{
-                width: 30,
-                height: 30,
+                padding: 14,
+                textAlign: "center",
+                color: "var(--text-3)",
+                fontSize: 11.5,
+                border: "1px dashed var(--line)",
                 borderRadius: 8,
-                background: "rgba(4,186,191,.1)",
-                border: "1px solid var(--line-2)",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--accent-2)",
-                flexShrink: 0,
               }}
             >
-              <Icon name={it.icon} size={14} />
+              No items. Click "Add item" below.
             </div>
-            <input
-              className="input small"
-              value={it.label}
-              onChange={(e) => {
-                const next = [...d.items];
-                next[i] = { ...it, label: e.target.value };
-                patch({ items: next });
+          )}
+          {items.map((it, i) => (
+            <div
+              key={i}
+              style={{
+                padding: 8,
+                borderRadius: 10,
+                background: "rgba(255,255,255,.02)",
+                border: "1px solid var(--line)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
               }}
-              style={{ flex: 1 }}
-            />
-            <input
-              className="input small mono"
-              value={it.href}
-              onChange={(e) => {
-                const next = [...d.items];
-                next[i] = { ...it, href: e.target.value };
-                patch({ items: next });
-              }}
-              style={{ flex: 1, fontSize: 11 }}
-            />
-          </div>
-        ))}
-      </div>
-    </FieldGroup>
+            >
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 9.5,
+                    color: "var(--text-3)",
+                    letterSpacing: ".14em",
+                    flex: 1,
+                  }}
+                >
+                  ITEM {i + 1}
+                </span>
+                <button
+                  className="btn icon ghost"
+                  title="Move up"
+                  disabled={i === 0}
+                  onClick={() => moveItem(i, -1)}
+                  style={{ width: 22, height: 22, opacity: i === 0 ? 0.3 : 1 }}
+                >
+                  <Icon
+                    name="chevron-down"
+                    size={11}
+                    style={{ transform: "rotate(180deg)" }}
+                  />
+                </button>
+                <button
+                  className="btn icon ghost"
+                  title="Move down"
+                  disabled={i === items.length - 1}
+                  onClick={() => moveItem(i, 1)}
+                  style={{ width: 22, height: 22, opacity: i === items.length - 1 ? 0.3 : 1 }}
+                >
+                  <Icon name="chevron-down" size={11} />
+                </button>
+                <button
+                  className="btn icon ghost"
+                  title="Delete item"
+                  onClick={() => removeItem(i)}
+                  style={{ width: 22, height: 22 }}
+                >
+                  <Icon name="trash" size={11} />
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <select
+                  className="input small"
+                  value={it.icon}
+                  onChange={(e) => updateItem(i, { icon: e.target.value })}
+                  style={{
+                    width: 90,
+                    flexShrink: 0,
+                    fontSize: 11,
+                    padding: "5px 6px",
+                  }}
+                  title="Icon"
+                >
+                  {NAV_ICON_OPTIONS.map((opt) => (
+                    <option key={opt.key} value={opt.key}>
+                      {opt.key}
+                    </option>
+                  ))}
+                  {!NAV_ICON_OPTIONS.some((o) => o.key === it.icon) && (
+                    <option value={it.icon}>{it.icon} (custom)</option>
+                  )}
+                </select>
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 6,
+                    background: "rgba(4,186,191,.1)",
+                    border: "1px solid var(--line-2)",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "var(--accent-2)",
+                    flexShrink: 0,
+                  }}
+                  title="Preview"
+                >
+                  <Icon
+                    name={
+                      (NAV_ICON_OPTIONS.find((o) => o.key === it.icon)?.iconName ??
+                        "card") as any
+                    }
+                    size={13}
+                  />
+                </div>
+                <input
+                  className="input small"
+                  value={it.label}
+                  onChange={(e) => updateItem(i, { label: e.target.value })}
+                  placeholder="Label"
+                  style={{ flex: 1 }}
+                />
+              </div>
+
+              <input
+                className="input small mono"
+                value={it.href}
+                onChange={(e) => updateItem(i, { href: e.target.value })}
+                placeholder="#section, /path, or https://…"
+                style={{ fontSize: 11 }}
+              />
+              <div style={{ fontSize: 10, color: "var(--text-3)", lineHeight: 1.4 }}>
+                <span style={{ color: "var(--accent-2)" }}>#payment</span> or{" "}
+                <span style={{ color: "var(--accent-2)" }}>/payment</span> → smooth-scroll to
+                that section.{" "}
+                <span style={{ color: "var(--accent-2)" }}>/about</span> → navigates to that
+                page.
+              </div>
+            </div>
+          ))}
+
+          <button
+            className="btn"
+            onClick={addItem}
+            disabled={items.length >= maxItems}
+            style={{
+              width: "100%",
+              justifyContent: "center",
+              borderStyle: "dashed",
+              color: "var(--accent-2)",
+              opacity: items.length >= maxItems ? 0.5 : 1,
+            }}
+          >
+            <Icon name="plus" size={12} />
+            Add item
+          </button>
+        </div>
+      </FieldGroup>
+    </>
   );
 }
 
@@ -1275,10 +1284,6 @@ type TextColorSlot = {
  * key and applies it to the right element.
  */
 const TEXT_SLOTS: Record<string, TextColorSlot[]> = {
-  appHeader: [
-    { key: "ctaText", label: "CTA text", fallback: "#0a2a23" },
-    { key: "ctaBg", label: "CTA background", fallback: "#04babf" },
-  ],
   homeHero: [
     { key: "subtitle", label: "Subtitle", fallback: "#A6AABE", hint: "Below the headline" },
     { key: "ctaText", label: "CTA text", fallback: "#0a2a23" },
@@ -1305,12 +1310,6 @@ const TEXT_SLOTS: Record<string, TextColorSlot[]> = {
     { key: "eyebrow", label: "Eyebrow", fallback: "#A6AABE" },
     { key: "subtitle", label: "Subtitle", fallback: "#A6AABE" },
   ],
-  earn: [
-    { key: "eyebrow", label: "Eyebrow", fallback: "#A6AABE" },
-    { key: "subtitle", label: "Subtitle", fallback: "#A6AABE" },
-    { key: "apr", label: "APR value", fallback: "#46F1C5", hint: "e.g. 3%" },
-    { key: "aprLabel", label: "APR label", fallback: "#A6AABE", hint: "e.g. APR up to" },
-  ],
   crypto: [
     { key: "eyebrow", label: "Eyebrow", fallback: "#A6AABE" },
     { key: "subtitle", label: "Subtitle", fallback: "#A6AABE" },
@@ -1321,10 +1320,6 @@ const TEXT_SLOTS: Record<string, TextColorSlot[]> = {
     { key: "price", label: "Price", fallback: "#d4d4d8" },
     { key: "up", label: "Positive change", fallback: "#2ee8a0" },
     { key: "down", label: "Negative change", fallback: "#ef4444" },
-  ],
-  linkedAccounts: [
-    { key: "eyebrow", label: "Eyebrow", fallback: "#A6AABE" },
-    { key: "subtitle", label: "Subtitle", fallback: "#A6AABE" },
   ],
   collaborations: [
     { key: "body", label: "Partner names", fallback: "#A6AABE" },
@@ -1428,6 +1423,191 @@ function TextColorsBlock({
             slot={slot}
             value={textColors[slot.key]}
             onChange={(v) => patchText(slot.key, v)}
+          />
+        ))}
+      </div>
+    </FieldGroup>
+  );
+}
+
+/* ---------- HEADING-TAG controls (SEO) ---------- */
+
+type HeadingTag = "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+
+type HeadingSlot = {
+  /** Key under `data.style.headings[key]`. */
+  key: string;
+  /** Human label shown in the Style panel. */
+  label: string;
+  /** Tag the renderer falls back to when no override is set. */
+  defaultTag: HeadingTag;
+  /** Optional second line under the label. */
+  hint?: string;
+};
+
+/**
+ * Per-section heading-tag slots. Mirrors `TEXT_SLOTS` but additionally
+ * includes the `title` slot for the main headline (`titleParts`). Each
+ * `defaultTag` mirrors the section's current markup so existing pages render
+ * identically until an editor changes a value.
+ */
+const HEADING_SLOTS: Record<string, HeadingSlot[]> = {
+  homeHero: [
+    { key: "title", label: "Headline", defaultTag: "h1" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+  features: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "cardTitle", label: "Card title", defaultTag: "h3", hint: "All cards" },
+    { key: "cardDesc", label: "Card description", defaultTag: "p" },
+  ],
+  featureGrid: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "tileLabel", label: "Tile label", defaultTag: "p", hint: "Send / Grow / etc." },
+    { key: "tileTitle", label: "Tile title", defaultTag: "h3", hint: "All tiles" },
+    { key: "tileBody", label: "Tile body", defaultTag: "p" },
+  ],
+  payment: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+  transfer: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+  crypto: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+  collaborations: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+  ],
+  customSection: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+  joinUs: [
+    { key: "title", label: "Section title", defaultTag: "h2" },
+    { key: "eyebrow", label: "Eyebrow", defaultTag: "p" },
+    { key: "subtitle", label: "Subtitle", defaultTag: "p" },
+  ],
+};
+
+const ALL_TAGS: HeadingTag[] = ["p", "h1", "h2", "h3", "h4", "h5", "h6"];
+
+const TAG_LABEL: Record<HeadingTag, string> = {
+  p: "Paragraph",
+  h1: "H1",
+  h2: "H2",
+  h3: "H3",
+  h4: "H4",
+  h5: "H5",
+  h6: "H6",
+};
+
+function HeadingTagRow({
+  slot,
+  value,
+  onChange,
+}: {
+  slot: HeadingSlot;
+  value: HeadingTag | undefined;
+  onChange: (next: HeadingTag | undefined) => void;
+}) {
+  const hasValue = value !== undefined;
+  const shown = hasValue ? value! : slot.defaultTag;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <select
+        value={shown}
+        onChange={(e) => onChange(e.target.value as HeadingTag)}
+        className="input small mono"
+        aria-label={`Heading tag for ${slot.label}`}
+        // `color-scheme: dark` tells the browser to render the native dropdown
+        // popup with dark-mode system colors, so options aren't invisible
+        // white-on-white on the dark theme. Width fits the longest label
+        // ("Paragraph") + the native arrow so it doesn't get clipped.
+        style={{
+          width: 112,
+          fontSize: 11.5,
+          padding: "5px 8px",
+          paddingRight: 22,
+          flexShrink: 0,
+          fontWeight: 600,
+          colorScheme: "dark",
+          color: hasValue ? "#1ad6db" : "#eaf4ff",
+          background: hasValue ? "rgba(4,186,191,.14)" : "#0e1530",
+          borderColor: hasValue ? "rgba(4,186,191,.55)" : "var(--line)",
+        }}
+      >
+        {ALL_TAGS.map((tag) => (
+          <option
+            key={tag}
+            value={tag}
+            // Explicit option styling — covers browsers that ignore
+            // `color-scheme` (e.g. some Windows builds).
+            style={{ background: "#0e1530", color: "#eaf4ff" }}
+          >
+            {TAG_LABEL[tag]}
+          </option>
+        ))}
+      </select>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 12, color: "var(--text)" }}>{slot.label}</span>
+        {slot.hint && (
+          <span style={{ fontSize: 10.5, color: "var(--text-3)" }}>{slot.hint}</span>
+        )}
+      </div>
+      <span
+        className="mono"
+        style={{
+          fontSize: 10,
+          color: hasValue ? "var(--text-2)" : "var(--text-3)",
+          fontStyle: hasValue ? "normal" : "italic",
+        }}
+      >
+        {hasValue ? shown.toUpperCase() : "default"}
+      </span>
+      {hasValue && (
+        <button
+          className="btn icon ghost"
+          title="Reset"
+          style={{ width: 22, height: 22 }}
+          onClick={() => onChange(undefined)}
+        >
+          <Icon name="x" size={11} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function HeadingsBlock({
+  sectionType,
+  headings,
+  patchHeading,
+}: {
+  sectionType: string;
+  headings: Record<string, HeadingTag | undefined>;
+  patchHeading: (key: string, value: HeadingTag | undefined) => void;
+}) {
+  const slots = HEADING_SLOTS[sectionType];
+  if (!slots || slots.length === 0) return null;
+  return (
+    <FieldGroup label="Heading levels" hint="Per text element">
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {slots.map((slot) => (
+          <HeadingTagRow
+            key={slot.key}
+            slot={slot}
+            value={headings[slot.key]}
+            onChange={(v) => patchHeading(slot.key, v)}
           />
         ))}
       </div>
@@ -1684,8 +1864,10 @@ function SectionStyleInspector({ section, patch }: { section: SectionMeta; patch
   const currentStyle = (d.style ?? {}) as {
     bg?: Background;
     text?: Record<string, string | undefined>;
+    headings?: Record<string, HeadingTag | undefined>;
   };
   const currentText = currentStyle.text ?? {};
+  const currentHeadings = currentStyle.headings ?? {};
 
   const patchBg = (bg: Background | undefined) => {
     patch({ style: { ...currentStyle, bg } });
@@ -1696,6 +1878,13 @@ function SectionStyleInspector({ section, patch }: { section: SectionMeta; patch
     if (value === undefined) delete nextText[key];
     else nextText[key] = value;
     patch({ style: { ...currentStyle, text: nextText } });
+  };
+
+  const patchHeading = (key: string, value: HeadingTag | undefined) => {
+    const nextHeadings = { ...currentHeadings };
+    if (value === undefined) delete nextHeadings[key];
+    else nextHeadings[key] = value;
+    patch({ style: { ...currentStyle, headings: nextHeadings } });
   };
 
   // Section-specific colour controls (titleParts colours, card backgrounds, etc.).
@@ -1709,9 +1898,7 @@ function SectionStyleInspector({ section, patch }: { section: SectionMeta; patch
       break;
     case "payment":
     case "transfer":
-    case "earn":
     case "crypto":
-    case "linkedAccounts":
     case "joinUs":
     case "collaborations":
     case "featureGrid":
@@ -1732,6 +1919,11 @@ function SectionStyleInspector({ section, patch }: { section: SectionMeta; patch
         textColors={currentText}
         patchText={patchText}
       />
+      <HeadingsBlock
+        sectionType={section.type}
+        headings={currentHeadings}
+        patchHeading={patchHeading}
+      />
       {extras}
     </>
   );
@@ -1751,8 +1943,6 @@ export function SectionInspector({
 
   const d = section.data as any;
   switch (section.type) {
-    case "appHeader":
-      return <AppHeaderInspector d={d} patch={patch} />;
     case "homeHero":
       return <HomeHeroInspector d={d} patch={patch} />;
     case "features":
@@ -1763,14 +1953,10 @@ export function SectionInspector({
       return <PaymentInspector d={d} patch={patch} />;
     case "transfer":
       return <TransferInspector d={d} patch={patch} />;
-    case "earn":
-      return <EarnInspector d={d} patch={patch} />;
     case "crypto":
       return <CryptoInspector d={d} patch={patch} />;
     case "currencies":
       return <CurrenciesInspector d={d} patch={patch} />;
-    case "linkedAccounts":
-      return <LinkedAccountsInspector d={d} patch={patch} />;
     case "collaborations":
       return <CollaborationsInspector d={d} patch={patch} />;
     case "customSection":
