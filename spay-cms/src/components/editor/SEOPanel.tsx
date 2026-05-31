@@ -1,0 +1,847 @@
+'use client';
+
+import React from 'react';
+import type { Editor as TiptapEditorType } from '@tiptap/react';
+import {
+  Twitter, Facebook, CheckCircle2, XCircle, AlertTriangle,
+  Eye, EyeOff, Link2, FileText, NotebookPen, ImageIcon as ImagePickerIcon,
+  X, Image as ImageGlyph,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
+import { Switch } from '@/components/ui/Switch';
+import { Label } from '@/components/ui/Label';
+import { Button } from '@/components/ui/Button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/Accordion';
+import { Badge } from '@/components/ui/Badge';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { useSuggestions, type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance } from '@/lib/queries';
+import { MediaPickerModal } from '@/components/MediaPickerModal';
+import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Ban, ImageOff, DatabaseZap, Activity } from 'lucide-react';
+
+const SITE_ORIGIN = 'https://spay.finance';
+
+const defaultSEO: SEO = {
+  title: '', description: '', canonical: '', noindex: false, nofollow: false,
+  og: { title: '', description: '', image: '' },
+  twitter: { card: 'summary_large_image', title: '', description: '', image: '' },
+};
+
+/** Featured image stored as a populated Media doc or just an id */
+type FeaturedImage = string | { _id: string; url: string; alt: string; variants?: Record<string, string>; width?: number; height?: number } | null | undefined;
+
+type Props = {
+  title: string;
+  slug: string;
+  seo: SEO | null | undefined;
+  onChange: (next: SEO) => void;
+  schema?: StructuredData | null | undefined;
+  onSchemaChange?: (next: StructuredData) => void;
+  performance?: Performance | null | undefined;
+  onPerformanceChange?: (next: Performance) => void;
+  kind?: 'page' | 'post';
+  editor?: TiptapEditorType | null;
+  /** Used to fetch related-content suggestions */
+  entityId?: string;
+  category?: string;
+  tags?: string[];
+  /** Featured image (populated on fetch) */
+  featuredImage?: FeaturedImage;
+  /** Called with the media id (or null to clear) when featured image changes */
+  onFeaturedImageChange?: (mediaId: string | null, picked?: MediaItem) => void;
+};
+
+export function SEOPanel({
+  title, slug, seo: seoProp, onChange, schema: schemaProp, onSchemaChange,
+  performance: perfProp, onPerformanceChange,
+  kind = 'page', editor,
+  entityId, category, tags, featuredImage, onFeaturedImageChange,
+}: Props) {
+  const schema: StructuredData = React.useMemo(
+    () => ({ ...emptyStructuredData, ...(schemaProp ?? {}) }),
+    [schemaProp],
+  );
+  const patchSchema = (partial: Partial<StructuredData>) =>
+    onSchemaChange?.({ ...schema, ...partial });
+
+  const perf: Performance = React.useMemo(
+    () => ({ ...emptyPerformance, ...(perfProp ?? {}) }),
+    [perfProp],
+  );
+  const patchPerf = (partial: Partial<Performance>) =>
+    onPerformanceChange?.({ ...perf, ...partial });
+  const seo: SEO = React.useMemo(() => ({ ...defaultSEO, ...(seoProp ?? {}), og: { ...defaultSEO.og, ...(seoProp?.og ?? {}) }, twitter: { ...defaultSEO.twitter, ...(seoProp?.twitter ?? {}) } }), [seoProp]);
+  const patch = (partial: Partial<SEO>) => onChange({ ...seo, ...partial });
+  const patchOG = (partial: Partial<SEO['og']>) => onChange({ ...seo, og: { ...seo.og, ...partial } });
+  const patchTW = (partial: Partial<SEO['twitter']>) => onChange({ ...seo, twitter: { ...seo.twitter, ...partial } });
+
+  const displayTitle = seo.title || title;
+  const titleLen = displayTitle.length;
+  const descLen = seo.description.length;
+
+  // ─── Auto canonical (used as placeholder + fallback display) ──
+  const livePath = kind === 'page'
+    ? (slug.startsWith('/') ? slug : '/' + (slug || ''))
+    : `/blog/${slug.replace(/^\//, '')}`;
+  const autoCanonical = `${SITE_ORIGIN}${livePath}`;
+
+  // ─── Featured / OG / Twitter image picker state ───────────────
+  const [pickerOpen, setPickerOpen] = React.useState<null | 'featured' | 'og' | 'twitter'>(null);
+  const featured = typeof featuredImage === 'object' && featuredImage ? featuredImage : null;
+  const featuredAlt = featured?.alt ?? '';
+  const featuredUrl = featured?.url ?? '';
+
+  // Image-resolution chain: OG image → explicit value → featured image
+  // Twitter image      → explicit value → OG image → featured image
+  const resolvedOgImage = seo.og.image || featuredUrl;
+  const resolvedTwitterImage = seo.twitter.image || resolvedOgImage;
+
+  // ─── Optional content warnings ─────────────────────────────────
+  const warnings = React.useMemo(() => {
+    const items: { title: string }[] = [];
+    if (!editor) return items;
+
+    let h1Count = 0;
+    let internalLinks = 0;
+    const walk = (node: any) => {
+      if (!node) return;
+      if (node.type === 'heading' && node.attrs?.level === 1) h1Count++;
+      const link = node.marks?.find((m: any) => m.type === 'link');
+      if (link?.attrs?.href && !/^https?:\/\//i.test(link.attrs.href)) internalLinks++;
+      if (node.content) node.content.forEach(walk);
+    };
+    walk(editor.getJSON());
+
+    if (h1Count === 0)        items.push({ title: 'Missing H1' });
+    else if (h1Count > 1)     items.push({ title: `Multiple H1 headings (${h1Count})` });
+
+    if (internalLinks === 0)  items.push({ title: 'No internal links' });
+
+    if (!featured)            items.push({ title: 'No featured image' });
+    else if (!featuredAlt)    items.push({ title: 'Featured image missing alt text' });
+
+    return items;
+  }, [editor, editor?.state.doc, featured, featuredAlt]);
+
+  // ─── Linked-hrefs set (used to disable already-linked suggestions) ──
+  const linkedHrefs = React.useMemo(() => {
+    const set = new Set<string>();
+    if (editor) {
+      const walk = (node: any) => {
+        if (!node) return;
+        const link = node.marks?.find((m: any) => m.type === 'link');
+        const href = link?.attrs?.href;
+        if (href) set.add(href);
+        node.content?.forEach(walk);
+      };
+      walk(editor.getJSON());
+    }
+    return set;
+  }, [editor, editor?.state.doc]);
+
+  const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions({
+    excludeId: entityId,
+    excludeType: kind,
+    category,
+    tags,
+    limit: 6,
+  });
+
+  const insertInternalLink = (href: string, anchorText: string) => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      // No selection → insert anchorText with the link mark
+      editor.chain().focus().insertContent({
+        type: 'text',
+        text: anchorText,
+        marks: [{ type: 'link', attrs: { href } }],
+      }).run();
+    } else {
+      editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Scrollable */}
+      <div className="flex-1 overflow-y-auto">
+        <Accordion type="multiple" defaultValue={['basics', 'warnings']}>
+          <AccordionItem value="basics" className="px-5">
+            <AccordionTrigger>Basics</AccordionTrigger>
+            <AccordionContent className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label htmlFor="seo-title">SEO title</Label>
+                  <span className={cn('font-mono text-[10px]',
+                    titleLen > 60 ? 'text-warning' : titleLen < 30 ? 'text-fg-4' : 'text-success'
+                  )}>
+                    {titleLen}/60
+                  </span>
+                </div>
+                <Input
+                  id="seo-title"
+                  value={seo.title}
+                  onChange={(e) => patch({ title: e.target.value })}
+                  placeholder={title || 'Title shown in search results'}
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label htmlFor="meta-desc">Meta description</Label>
+                  <span className={cn('font-mono text-[10px]',
+                    descLen > 160 ? 'text-warning' : descLen < 120 ? 'text-warning' : 'text-success'
+                  )}>
+                    {descLen}/160
+                  </span>
+                </div>
+                <Textarea
+                  id="meta-desc"
+                  rows={3}
+                  value={seo.description}
+                  onChange={(e) => patch({ description: e.target.value })}
+                  placeholder="120–160 characters summarizing the page"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label htmlFor="canonical">Canonical URL</Label>
+                  {!seo.canonical && (
+                    <Badge variant="cyan" size="sm">auto</Badge>
+                  )}
+                </div>
+                <Input
+                  id="canonical"
+                  className="mt-1.5 font-mono"
+                  value={seo.canonical}
+                  onChange={(e) => patch({ canonical: e.target.value })}
+                  placeholder={autoCanonical}
+                />
+                {seo.canonical && (
+                  <p className="text-[11px] text-fg-4 mt-1.5 leading-relaxed">
+                    Override active. <button type="button" className="text-cyan-300 hover:underline" onClick={() => patch({ canonical: '' })}>Reset to auto</button>.
+                  </p>
+                )}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Featured image */}
+          <AccordionItem value="featured" className="px-5">
+            <AccordionTrigger>
+              <span className="flex items-center gap-2">
+                Featured image
+                {featured ? (
+                  featuredAlt
+                    ? <Badge variant="success" size="sm">alt set</Badge>
+                    : <Badge variant="warning" size="sm">no alt</Badge>
+                ) : (
+                  <Badge variant="default" size="sm">not set</Badge>
+                )}
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-3">
+              {featured ? (
+                <div className="rounded-spay-md border border-line bg-surface/40 overflow-hidden">
+                  <div className="aspect-[16/9] bg-surface relative overflow-hidden">
+                    <img src={featuredUrl} alt={featuredAlt} className="absolute inset-0 w-full h-full object-cover" />
+                  </div>
+                  <div className="p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-fg-4 font-semibold mb-1">Alt text</p>
+                    {featuredAlt ? (
+                      <p className="text-sm text-fg-2 italic">&quot;{featuredAlt}&quot;</p>
+                    ) : (
+                      <p className="text-sm text-danger">Missing — edit in Media Library to add alt text for SEO + accessibility.</p>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <Button size="sm" variant="secondary" onClick={() => setPickerOpen('featured')}>
+                        <ImagePickerIcon className="size-3.5" />
+                        Change
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => onFeaturedImageChange?.(null)}>
+                        <X />
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen('featured')}
+                  className="w-full rounded-spay-md border border-dashed border-line-strong bg-surface/40 px-4 py-6 text-center hover:border-cyan-300/40 transition-colors"
+                >
+                  <div className="inline-flex items-center justify-center size-9 rounded-spay-md bg-cyan-300/10 border border-cyan-300/25 text-cyan-300 mb-2">
+                    <ImagePickerIcon className="size-4" />
+                  </div>
+                  <p className="text-sm font-medium text-fg-1">Pick a featured image</p>
+                  <p className="text-[11px] text-fg-3 mt-0.5">Used as the OG image fallback for social previews.</p>
+                </button>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="warnings" className="px-5">
+            <AccordionTrigger>
+              <span className="flex items-center gap-2">
+                Issues
+                <Badge variant={warnings.length ? 'warning' : 'success'} size="sm">
+                  {warnings.length ? String(warnings.length) : 'all clear'}
+                </Badge>
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-2">
+              {warnings.length === 0 ? (
+                <div className="flex items-start gap-2.5 p-3 rounded-spay-md border border-success/30 bg-success/[0.06]">
+                  <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-success" />
+                  <p className="text-sm text-fg-1">All checks pass.</p>
+                </div>
+              ) : (
+                warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-2.5 p-3 rounded-spay-md border border-warning/30 bg-warning/[0.06]">
+                    <AlertTriangle className="size-4 shrink-0 mt-0.5 text-warning" />
+                    <p className="text-sm text-fg-1">{w.title}</p>
+                  </div>
+                ))
+              )}
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="linking" className="px-5">
+            <AccordionTrigger>Internal linking</AccordionTrigger>
+            <AccordionContent className="space-y-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-4 mb-2">
+                  Suggested pages to link
+                </p>
+                {loadingSuggestions ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-spay-sm" />)}
+                  </div>
+                ) : suggestions.length === 0 ? (
+                  <p className="text-xs text-fg-3 px-3 py-4 text-center border border-dashed border-line rounded-spay-md">
+                    No suggestions yet. Add a category or tags to surface related content.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {suggestions.map((s) => {
+                      const alreadyLinked = linkedHrefs.has(s.url);
+                      return (
+                        <li key={`${s.kind}-${s._id}`}>
+                          <button
+                            type="button"
+                            onClick={() => insertInternalLink(s.url, s.title)}
+                            disabled={alreadyLinked}
+                            className={cn(
+                              'group w-full flex items-start gap-2.5 px-3 py-2 rounded-spay-sm border text-left transition-colors',
+                              alreadyLinked
+                                ? 'border-success/25 bg-success/[0.04] cursor-default'
+                                : 'border-line bg-surface/40 hover:border-cyan-300/40 hover:bg-cyan-300/[0.05]'
+                            )}
+                          >
+                            <div className={cn(
+                              'size-7 rounded-spay-sm border flex items-center justify-center shrink-0 [&_svg]:size-3.5',
+                              alreadyLinked ? 'border-success/30 bg-success/10 text-success' : 'border-line bg-surface text-fg-3 group-hover:text-cyan-300 group-hover:border-cyan-300/30'
+                            )}>
+                              {alreadyLinked ? <CheckCircle2 /> : s.kind === 'page' ? <FileText /> : <NotebookPen />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-fg-1 truncate">{s.title}</p>
+                              <p className="font-mono text-[10px] text-fg-3 truncate">{s.url}</p>
+                              {!alreadyLinked && s.reasons.length > 0 && (
+                                <p className="text-[10px] text-fg-4 truncate mt-0.5">{s.reasons[0]}</p>
+                              )}
+                            </div>
+                            {!alreadyLinked && (
+                              <Link2 className="size-3.5 text-fg-4 shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="indexing" className="px-5">
+            <AccordionTrigger>Indexing</AccordionTrigger>
+            <AccordionContent className="space-y-3">
+              <label className="flex items-center justify-between p-3 rounded-spay-md border border-line cursor-pointer">
+                <div className="flex items-center gap-2.5">
+                  {seo.noindex ? <EyeOff className="size-4 text-fg-3" /> : <Eye className="size-4 text-cyan-300" />}
+                  <div>
+                    <p className="text-sm font-medium text-fg-1">Allow indexing</p>
+                  </div>
+                </div>
+                <Switch checked={!seo.noindex} onCheckedChange={(v) => patch({ noindex: !v })} />
+              </label>
+              <label className="flex items-center justify-between p-3 rounded-spay-md border border-line cursor-pointer">
+                <div>
+                  <p className="text-sm font-medium text-fg-1">Allow link following</p>
+                </div>
+                <Switch checked={!seo.nofollow} onCheckedChange={(v) => patch({ nofollow: !v })} />
+              </label>
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="social" className="px-5">
+            <AccordionTrigger>Open Graph &amp; Twitter</AccordionTrigger>
+            <AccordionContent>
+              <Tabs defaultValue="og">
+                <TabsList className="w-full">
+                  <TabsTrigger value="og" className="flex-1"><Facebook className="size-3" />Open Graph</TabsTrigger>
+                  <TabsTrigger value="tw" className="flex-1"><Twitter className="size-3" />Twitter</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="og" className="space-y-3">
+                  <div>
+                    <Label>OG title</Label>
+                    <Input className="mt-1.5" value={seo.og.title} onChange={(e) => patchOG({ title: e.target.value })} placeholder={displayTitle} />
+                  </div>
+                  <div>
+                    <Label>OG description</Label>
+                    <Textarea className="mt-1.5" rows={2} value={seo.og.description} onChange={(e) => patchOG({ description: e.target.value })} placeholder={seo.description} />
+                  </div>
+                  <SocialImageField
+                    label="OG image"
+                    explicitUrl={seo.og.image}
+                    resolvedUrl={resolvedOgImage}
+                    fallbackHint={!seo.og.image && featuredUrl ? 'using Featured image as fallback' : !seo.og.image ? 'no image set' : undefined}
+                    onPick={() => setPickerOpen('og')}
+                    onClear={() => patchOG({ image: '' })}
+                    onChangeUrl={(v) => patchOG({ image: v })}
+                  />
+                </TabsContent>
+
+                <TabsContent value="tw" className="space-y-3">
+                  <div>
+                    <Label>Twitter card type</Label>
+                    <select
+                      value={seo.twitter.card}
+                      onChange={(e) => patchTW({ card: e.target.value })}
+                      className="mt-1.5 h-9 w-full rounded-spay-md border border-line bg-surface-raised px-3 text-sm text-fg-1 focus:outline-none focus:border-cyan-300/60"
+                    >
+                      <option value="summary_large_image">summary_large_image</option>
+                      <option value="summary">summary</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Twitter title</Label>
+                    <Input className="mt-1.5" value={seo.twitter.title} onChange={(e) => patchTW({ title: e.target.value })} placeholder={displayTitle} />
+                  </div>
+                  <div>
+                    <Label>Twitter description</Label>
+                    <Textarea className="mt-1.5" rows={2} value={seo.twitter.description} onChange={(e) => patchTW({ description: e.target.value })} placeholder={seo.description} />
+                  </div>
+                  <SocialImageField
+                    label="Twitter image"
+                    explicitUrl={seo.twitter.image ?? ''}
+                    resolvedUrl={resolvedTwitterImage}
+                    fallbackHint={
+                      !seo.twitter.image && resolvedOgImage
+                        ? 'using OG image as fallback'
+                        : !seo.twitter.image
+                        ? 'no image set'
+                        : undefined
+                    }
+                    onPick={() => setPickerOpen('twitter')}
+                    onClear={() => patchTW({ image: '' })}
+                    onChangeUrl={(v) => patchTW({ image: v })}
+                  />
+                </TabsContent>
+              </Tabs>
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="schema" className="px-5">
+            <AccordionTrigger>
+              <span className="flex items-center gap-2">
+                Structured Data
+                <Badge variant={schema.type === 'none' ? 'default' : 'cyan'} size="sm">
+                  {schema.type === 'none' ? 'None' : schema.type.toUpperCase()}
+                </Badge>
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4">
+              <SchemaTypePicker
+                value={schema.type}
+                kind={kind}
+                onChange={(t) => patchSchema({ type: t })}
+              />
+
+              {schema.type === 'article' && (
+                <div className="rounded-spay-md border border-cyan-300/25 bg-cyan-300/[0.04] p-3 text-xs text-fg-3 leading-relaxed">
+                  Article JSON-LD is built automatically from this page's title, description, featured image,
+                  publish date, and the global Organization (publisher). No extra fields needed.
+                  {kind === 'post' && (
+                    <span className="block mt-1.5 text-fg-4">
+                      Posts already emit <span className="font-mono text-cyan-300">BlogPosting</span> by default — this
+                      additional Article entry is usually redundant.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {schema.type === 'faq' && (
+                <FaqEditor
+                  items={schema.faq}
+                  onChange={(faq) => patchSchema({ faq })}
+                />
+              )}
+
+              {schema.type === 'service' && (
+                <ServiceEditor
+                  value={schema.service}
+                  fallbackName={title}
+                  onChange={(service) => patchSchema({ service })}
+                />
+              )}
+
+              {schema.type === 'custom' && (
+                <CustomJsonLdEditor
+                  value={schema.customJsonLd}
+                  onChange={(customJsonLd) => patchSchema({ customJsonLd })}
+                />
+              )}
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="performance" className="px-5">
+            <AccordionTrigger>
+              <span className="flex items-center gap-2">
+                Performance
+                {(perf.skipAnalytics || perf.skipCustomScripts || perf.disableCache || !perf.lazyLoadImages) && (
+                  <Badge variant="warning" size="sm">Custom</Badge>
+                )}
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-2.5">
+              {/* One toggle covers BOTH analytics + custom script injection.
+                  We write to both backend fields so the website-next reader
+                  doesn't need any change. Either flag being true counts as on. */}
+              <PerfToggle
+                icon={Activity}
+                title="Disable heavy scripts"
+                checked={perf.skipAnalytics || perf.skipCustomScripts}
+                onChange={(v) => patchPerf({ skipAnalytics: v, skipCustomScripts: v })}
+              />
+              <PerfToggle
+                icon={DatabaseZap}
+                title="Disable caching"
+                checked={perf.disableCache}
+                onChange={(v) => patchPerf({ disableCache: v })}
+                danger={perf.disableCache}
+              />
+              <PerfToggle
+                icon={ImageOff}
+                title="Lazy-load body images"
+                checked={perf.lazyLoadImages}
+                onChange={(v) => patchPerf({ lazyLoadImages: v })}
+              />
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+
+        {/* Media picker — context-aware per which field opened it */}
+        <MediaPickerModal
+          open={!!pickerOpen}
+          onOpenChange={(o) => !o && setPickerOpen(null)}
+          accept="image"
+          onPick={(media) => {
+            if (pickerOpen === 'featured') {
+              onFeaturedImageChange?.(media._id, media);
+            } else if (pickerOpen === 'og') {
+              patchOG({ image: media.url });
+            } else if (pickerOpen === 'twitter') {
+              patchTW({ image: media.url });
+            }
+            setPickerOpen(null);
+          }}
+        />
+
+      </div>
+    </div>
+  );
+}
+
+/** Combined image picker + URL input + live preview for OG/Twitter image fields. */
+function SocialImageField({
+  label, explicitUrl, resolvedUrl, fallbackHint, onPick, onClear, onChangeUrl,
+}: {
+  label: string;
+  explicitUrl: string;
+  resolvedUrl: string;
+  fallbackHint?: string;
+  onPick: () => void;
+  onClear: () => void;
+  onChangeUrl: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label>{label}</Label>
+        {fallbackHint && <Badge variant="default" size="sm">{fallbackHint}</Badge>}
+      </div>
+      <div className="rounded-spay-md border border-line bg-surface/40 overflow-hidden">
+        {resolvedUrl ? (
+          <div className="aspect-[1.91/1] bg-surface relative overflow-hidden">
+            <img src={resolvedUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          </div>
+        ) : (
+          <div className="aspect-[1.91/1] bg-surface flex items-center justify-center text-fg-4 text-xs">
+            no preview
+          </div>
+        )}
+        <div className="flex items-center gap-2 p-2 border-t border-line">
+          <Button size="sm" variant="secondary" onClick={onPick}>
+            <ImageGlyph className="size-3.5" />
+            Pick
+          </Button>
+          {explicitUrl && (
+            <Button size="sm" variant="ghost" className="text-fg-3 hover:text-fg-1" onClick={onClear}>
+              <X className="size-3.5" />
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────
+ *  Structured-data editors
+ * ──────────────────────────────────────────────────────────────── */
+
+const SCHEMA_OPTIONS: { value: StructuredData['type']; label: string; description: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { value: 'none',    label: 'None',         description: 'Only global Organization + Breadcrumb schemas emit.',         icon: Ban },
+  { value: 'article', label: 'Article',      description: 'Auto-built from page fields. Best for blog-style content.',   icon: Newspaper },
+  { value: 'faq',     label: 'FAQ',          description: 'Q&A list — eligible for "People also ask" rich results.',     icon: HelpCircle },
+  { value: 'service', label: 'Service',      description: 'For services pages (consulting, cards, transfers…).',         icon: Briefcase },
+  { value: 'custom',  label: 'Custom JSON-LD', description: 'Paste any valid schema.org JSON. Validated on save.',       icon: Code2 },
+];
+
+function SchemaTypePicker({
+  value, kind, onChange,
+}: {
+  value: StructuredData['type'];
+  kind: 'page' | 'post';
+  onChange: (t: StructuredData['type']) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      {SCHEMA_OPTIONS.map((opt) => {
+        const Icon = opt.icon;
+        const selected = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              'flex items-start gap-2 p-2.5 rounded-spay-sm border text-left transition-colors',
+              selected
+                ? 'border-cyan-300/50 bg-cyan-300/[0.08] text-fg-1'
+                : 'border-line bg-surface/30 text-fg-3 hover:border-cyan-300/30 hover:text-fg-1',
+            )}
+          >
+            <Icon className={cn('size-3.5 shrink-0 mt-0.5', selected ? 'text-cyan-300' : 'text-fg-4')} />
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{opt.label}</p>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FaqEditor({
+  items, onChange,
+}: {
+  items: { q: string; a: string }[];
+  onChange: (next: { q: string; a: string }[]) => void;
+}) {
+  const update = (idx: number, partial: Partial<{ q: string; a: string }>) => {
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...partial } : it)));
+  };
+  const remove = (idx: number) => onChange(items.filter((_, i) => i !== idx));
+  const add = () => onChange([...items, { q: '', a: '' }]);
+
+  return (
+    <div className="space-y-2.5">
+      {items.map((it, i) => (
+        <div key={i} className="rounded-spay-sm border border-line bg-surface/30 p-2.5 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-4">Q&A #{i + 1}</span>
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="text-fg-4 hover:text-danger transition-colors"
+              aria-label="Remove"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+          <Input
+            value={it.q}
+            onChange={(e) => update(i, { q: e.target.value })}
+            placeholder="Question (e.g. How long does verification take?)"
+          />
+          <Textarea
+            rows={2}
+            value={it.a}
+            onChange={(e) => update(i, { a: e.target.value })}
+            placeholder="Answer — plain text, no HTML."
+          />
+        </div>
+      ))}
+      <Button variant="ghost" size="sm" onClick={add} className="w-full">
+        <Plus />Add question
+      </Button>
+    </div>
+  );
+}
+
+function ServiceEditor({
+  value, fallbackName, onChange,
+}: {
+  value: StructuredData['service'];
+  fallbackName: string;
+  onChange: (next: StructuredData['service']) => void;
+}) {
+  const patch = (p: Partial<StructuredData['service']>) => onChange({ ...value, ...p });
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label>Service name</Label>
+        <Input
+          className="mt-1.5"
+          value={value.name}
+          onChange={(e) => patch({ name: e.target.value })}
+          placeholder={fallbackName || 'Spay Card'}
+        />
+        <p className="text-[10px] text-fg-4 mt-1">Falls back to the page title.</p>
+      </div>
+      <div>
+        <Label>Description</Label>
+        <Textarea
+          className="mt-1.5"
+          rows={2}
+          value={value.description}
+          onChange={(e) => patch({ description: e.target.value })}
+          placeholder="What does this service do?"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Service type</Label>
+          <Input
+            className="mt-1.5"
+            value={value.serviceType}
+            onChange={(e) => patch({ serviceType: e.target.value })}
+            placeholder="e.g. Payment processing"
+          />
+        </div>
+        <div>
+          <Label>Area served</Label>
+          <Input
+            className="mt-1.5"
+            value={value.areaServed}
+            onChange={(e) => patch({ areaServed: e.target.value })}
+            placeholder="e.g. United States"
+          />
+        </div>
+      </div>
+      <div>
+        <Label>Price range <span className="text-fg-4 font-normal">(optional)</span></Label>
+        <Input
+          className="mt-1.5"
+          value={value.priceRange}
+          onChange={(e) => patch({ priceRange: e.target.value })}
+          placeholder="e.g. Free or $0"
+        />
+      </div>
+    </div>
+  );
+}
+
+function CustomJsonLdEditor({
+  value, onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  // Live JSON parse so users see errors before saving.
+  const error = React.useMemo(() => {
+    if (!value.trim()) return null;
+    try {
+      JSON.parse(value);
+      return null;
+    } catch (e: any) {
+      return e?.message ?? 'Invalid JSON';
+    }
+  }, [value]);
+
+  return (
+    <div className="space-y-2">
+      <Label>Raw JSON-LD</Label>
+      <div className={cn(
+        'rounded-spay-md border bg-surface-deepest overflow-hidden transition-colors',
+        error ? 'border-danger/40' : 'border-line',
+      )}>
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          rows={10}
+          placeholder={`{\n  "@context": "https://schema.org",\n  "@type": "Product",\n  "name": "Spay Card",\n  …\n}`}
+          className="w-full p-3 bg-transparent font-mono text-[11px] text-fg-1 placeholder:text-fg-4 outline-none resize-y leading-relaxed"
+        />
+      </div>
+      {error ? (
+        <div className="flex items-start gap-1.5 text-[11px] text-danger">
+          <XCircle className="size-3 mt-0.5 shrink-0" />
+          <span>JSON parse error: {error}</span>
+        </div>
+      ) : value.trim() ? (
+        <div className="flex items-start gap-1.5 text-[11px] text-success">
+          <CheckCircle2 className="size-3 mt-0.5 shrink-0" />
+          <span>Valid JSON — will be injected as-is on the live page.</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ─── Performance toggle row ─────────────────────────────────────── */
+
+function PerfToggle({
+  icon: Icon, title, checked, onChange, danger,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  danger?: boolean;
+}) {
+  return (
+    <label className={cn(
+      'flex items-center gap-2.5 p-2.5 rounded-spay-sm border cursor-pointer transition-colors',
+      danger ? 'border-warning/30 bg-warning/[0.04]' : 'border-line bg-surface/30 hover:bg-surface/60',
+    )}>
+      <Icon className={cn('size-3.5 shrink-0', checked ? (danger ? 'text-warning' : 'text-cyan-300') : 'text-fg-4')} />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-fg-1">{title}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} className="shrink-0" />
+    </label>
+  );
+}
