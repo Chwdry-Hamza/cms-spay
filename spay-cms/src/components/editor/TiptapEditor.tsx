@@ -21,6 +21,39 @@ type Props = {
 
 const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
 
+// The live website origin (where internal links actually resolve). Internal
+// links are stored as relative paths (e.g. /privacy-policy); opening one from
+// the CMS editor should point at the website, not the CMS itself.
+//
+// Use `||` (not `??`) so an empty-string env var also falls back, and keep a
+// hard fallback at the call site so we can NEVER emit a bare relative path
+// (that would open against the CMS origin, e.g. :3001).
+const WEBSITE_ORIGIN = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
+function toWebsiteUrl(href: string): string {
+  if (/^https?:\/\//i.test(href)) return href; // external/absolute — leave as-is
+  const origin = WEBSITE_ORIGIN || 'http://localhost:3000';
+  if (href.startsWith('/')) return `${origin}${href}`; // internal relative path → website origin
+  return href; // #anchors, mailto:, tel:, etc.
+}
+
+/**
+ * Intercept a click on a link inside the editor: open it in a new tab pointed
+ * at the website origin instead of letting the anchor navigate against the CMS.
+ * Returns true when it handled the click (so ProseMirror treats it as consumed).
+ */
+function handleLinkClick(event: MouseEvent): boolean {
+  const anchor = (event.target as HTMLElement | null)?.closest?.('a');
+  if (!anchor) return false;
+  const href = anchor.getAttribute('href') ?? '';
+  if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) {
+    return false;
+  }
+  event.preventDefault();
+  window.open(toWebsiteUrl(href), '_blank', 'noopener,noreferrer');
+  return true;
+}
+
 export function TiptapEditor({ value, onChange, onEditor, placeholder = 'Write or press / for commands…', className }: Props) {
   const editor = useEditor({
     extensions: [
@@ -51,6 +84,17 @@ export function TiptapEditor({ value, onChange, onEditor, placeholder = 'Write o
     content: value && Object.keys(value).length ? value : emptyDoc,
     onUpdate: ({ editor }) => {
       onChange(editor.getJSON());
+    },
+    // Intercept link clicks via ProseMirror's handleDOMEvents, which registers
+    // a real `click` DOM listener (so preventDefault actually cancels the
+    // anchor's target="_blank" navigation — handleClick fires on mouseup, too
+    // late for that). Internal links are rewritten to the website origin and
+    // opened in a new tab.
+    editorProps: {
+      handleDOMEvents: {
+        click: (_view, event) => handleLinkClick(event),
+        auxclick: (_view, event) => handleLinkClick(event),
+      },
     },
     immediatelyRender: false,
   });

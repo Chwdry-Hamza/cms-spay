@@ -67,10 +67,12 @@ export function LinkPickerModal({
       href: '/blog/' + p.slug,
       status: p.status,
     }));
-    return list.filter((i) =>
-      query ? (i.title + ' ' + i.href).toLowerCase().includes(query.toLowerCase()) : true
-    );
-  }, [pagesData, postsData, query]);
+    return list.filter((i) => {
+      // Never list the page/post currently being edited (can't link to itself).
+      if (context.excludeId && i.id === context.excludeId) return false;
+      return query ? (i.title + ' ' + i.href).toLowerCase().includes(query.toLowerCase()) : true;
+    });
+  }, [pagesData, postsData, query, context.excludeId]);
 
   const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions({
     ...context,

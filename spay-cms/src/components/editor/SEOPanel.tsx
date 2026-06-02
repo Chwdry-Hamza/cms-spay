@@ -4,7 +4,7 @@ import React from 'react';
 import type { Editor as TiptapEditorType } from '@tiptap/react';
 import {
   Twitter, Facebook, CheckCircle2, XCircle, AlertTriangle,
-  Eye, EyeOff, Link2, FileText, NotebookPen, ImageIcon as ImagePickerIcon,
+  Eye, EyeOff, ImageIcon as ImagePickerIcon,
   X, Image as ImageGlyph,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -17,7 +17,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/Accordion';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useSuggestions, type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance } from '@/lib/queries';
+import { type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance } from '@/lib/queries';
 import { MediaPickerModal } from '@/components/MediaPickerModal';
 import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Ban, ImageOff, DatabaseZap, Activity } from 'lucide-react';
 
@@ -57,7 +57,7 @@ export function SEOPanel({
   title, slug, seo: seoProp, onChange, schema: schemaProp, onSchemaChange,
   performance: perfProp, onPerformanceChange,
   kind = 'page', editor,
-  entityId, category, tags, featuredImage, onFeaturedImageChange,
+  featuredImage, onFeaturedImageChange,
 }: Props) {
   const schema: StructuredData = React.useMemo(
     () => ({ ...emptyStructuredData, ...(schemaProp ?? {}) }),
@@ -124,45 +124,6 @@ export function SEOPanel({
 
     return items;
   }, [editor, editor?.state.doc, featured, featuredAlt]);
-
-  // ─── Linked-hrefs set (used to disable already-linked suggestions) ──
-  const linkedHrefs = React.useMemo(() => {
-    const set = new Set<string>();
-    if (editor) {
-      const walk = (node: any) => {
-        if (!node) return;
-        const link = node.marks?.find((m: any) => m.type === 'link');
-        const href = link?.attrs?.href;
-        if (href) set.add(href);
-        node.content?.forEach(walk);
-      };
-      walk(editor.getJSON());
-    }
-    return set;
-  }, [editor, editor?.state.doc]);
-
-  const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions({
-    excludeId: entityId,
-    excludeType: kind,
-    category,
-    tags,
-    limit: 6,
-  });
-
-  const insertInternalLink = (href: string, anchorText: string) => {
-    if (!editor) return;
-    const { from, to } = editor.state.selection;
-    if (from === to) {
-      // No selection → insert anchorText with the link mark
-      editor.chain().focus().insertContent({
-        type: 'text',
-        text: anchorText,
-        marks: [{ type: 'link', attrs: { href } }],
-      }).run();
-    } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
-    }
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -308,65 +269,6 @@ export function SEOPanel({
                   </div>
                 ))
               )}
-            </AccordionContent>
-          </AccordionItem>
-
-          <AccordionItem value="linking" className="px-5">
-            <AccordionTrigger>Internal linking</AccordionTrigger>
-            <AccordionContent className="space-y-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-4 mb-2">
-                  Suggested pages to link
-                </p>
-                {loadingSuggestions ? (
-                  <div className="space-y-2">
-                    {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-spay-sm" />)}
-                  </div>
-                ) : suggestions.length === 0 ? (
-                  <p className="text-xs text-fg-3 px-3 py-4 text-center border border-dashed border-line rounded-spay-md">
-                    No suggestions yet. Add a category or tags to surface related content.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {suggestions.map((s) => {
-                      const alreadyLinked = linkedHrefs.has(s.url);
-                      return (
-                        <li key={`${s.kind}-${s._id}`}>
-                          <button
-                            type="button"
-                            onClick={() => insertInternalLink(s.url, s.title)}
-                            disabled={alreadyLinked}
-                            className={cn(
-                              'group w-full flex items-start gap-2.5 px-3 py-2 rounded-spay-sm border text-left transition-colors',
-                              alreadyLinked
-                                ? 'border-success/25 bg-success/[0.04] cursor-default'
-                                : 'border-line bg-surface/40 hover:border-cyan-300/40 hover:bg-cyan-300/[0.05]'
-                            )}
-                          >
-                            <div className={cn(
-                              'size-7 rounded-spay-sm border flex items-center justify-center shrink-0 [&_svg]:size-3.5',
-                              alreadyLinked ? 'border-success/30 bg-success/10 text-success' : 'border-line bg-surface text-fg-3 group-hover:text-cyan-300 group-hover:border-cyan-300/30'
-                            )}>
-                              {alreadyLinked ? <CheckCircle2 /> : s.kind === 'page' ? <FileText /> : <NotebookPen />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-fg-1 truncate">{s.title}</p>
-                              <p className="font-mono text-[10px] text-fg-3 truncate">{s.url}</p>
-                              {!alreadyLinked && s.reasons.length > 0 && (
-                                <p className="text-[10px] text-fg-4 truncate mt-0.5">{s.reasons[0]}</p>
-                              )}
-                            </div>
-                            {!alreadyLinked && (
-                              <Link2 className="size-3.5 text-fg-4 shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-
             </AccordionContent>
           </AccordionItem>
 
