@@ -3,7 +3,7 @@
  *
  * Leaves alone:
  *   - categories       (the colour-coded groupings)
- *   - media            (uploaded files in /uploads)
+ *   - media            (Media docs + their Cloudinary assets)
  *   - redirects        (so links keep working)
  *   - settings         (site SEO defaults, robots.txt, analytics IDs)
  *   - users / auth

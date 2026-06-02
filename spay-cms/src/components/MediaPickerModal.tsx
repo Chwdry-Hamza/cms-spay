@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, X, Upload, Loader2, Image as ImageIcon, CheckCircle2 } from 'lucide-react';
+import { Search, X, Image as ImageIcon, CheckCircle2 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/Dialog';
@@ -9,9 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useToast } from '@/components/ui/Toaster';
-import { useMedia, useUploadMedia, type MediaItem } from '@/lib/queries';
-import { apiErrorMessage } from '@/lib/api';
+import { useMedia, type MediaItem } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 
 /**
@@ -45,11 +43,9 @@ type Props = {
 
 export function MediaPickerModal(props: Props) {
   const { open, onOpenChange, accept = 'image', multiple } = props;
-  const { toast } = useToast();
   const [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<MediaItem | null>(null);
   const [pickedMany, setPickedMany] = React.useState<MediaItem[]>([]);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const filter = React.useMemo(
     () => ({
@@ -60,7 +56,6 @@ export function MediaPickerModal(props: Props) {
   );
 
   const { data = [], isLoading } = useMedia(filter);
-  const upload = useUploadMedia();
 
   // Reset selection when reopened
   React.useEffect(() => {
@@ -70,21 +65,6 @@ export function MediaPickerModal(props: Props) {
       setQuery('');
     }
   }, [open]);
-
-  const handleUpload = async (files: File[]) => {
-    if (!files.length) return;
-    try {
-      const items = await upload.mutateAsync(files);
-      toast({ title: `Uploaded ${items.length} file${items.length === 1 ? '' : 's'}`, variant: 'success' });
-      if (multiple) {
-        setPickedMany((cur) => [...cur, ...items]);
-      } else if (items[0]) {
-        setPicked(items[0]);
-      }
-    } catch (err) {
-      toast({ title: 'Upload failed', description: apiErrorMessage(err), variant: 'danger' });
-    }
-  };
 
   const togglePickMany = (m: MediaItem) => {
     setPickedMany((cur) => (cur.some((p) => p._id === m._id) ? cur.filter((p) => p._id !== m._id) : [...cur, m]));
@@ -107,7 +87,7 @@ export function MediaPickerModal(props: Props) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!upload.isPending) onOpenChange(o); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6">
           <DialogTitle>
@@ -116,7 +96,7 @@ export function MediaPickerModal(props: Props) {
           <DialogDescription>
             {multiple
               ? `Click each image to select. Pick ${minPick}–${maxPick} files.`
-              : 'Choose an existing file or upload a new one.'}
+              : 'Choose an existing file from your media library.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -130,27 +110,6 @@ export function MediaPickerModal(props: Props) {
               rightIcon={query ? <button onClick={() => setQuery('')}><X /></button> : undefined}
             />
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={upload.isPending}
-          >
-            {upload.isPending ? <Loader2 className="animate-spin" /> : <Upload />}
-            {upload.isPending ? 'Uploading…' : 'Upload new'}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={accept === 'image' ? 'image/*' : accept === 'video' ? 'video/*' : '*/*'}
-            multiple={!!multiple}
-            className="sr-only"
-            onChange={(e) => {
-              const f = Array.from(e.target.files ?? []);
-              handleUpload(f);
-              if (e.target) e.target.value = '';
-            }}
-          />
         </div>
 
         <div className="px-6 pt-4 pb-4 max-h-[420px] overflow-y-auto">
@@ -165,7 +124,7 @@ export function MediaPickerModal(props: Props) {
               <ImageIcon className="size-6 mx-auto mb-2 text-fg-4" />
               {query
                 ? <>No media matches <span className="font-mono text-fg-1">&quot;{query}&quot;</span></>
-                : 'No media yet — upload some files to get started.'}
+                : 'No media yet — add files in the Media Library.'}
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">

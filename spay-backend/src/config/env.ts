@@ -33,6 +33,11 @@ export const env = {
   // When set, the website must send a matching `x-register-secret` header.
   // When unset, registration is allowed only outside production (dev convenience).
   REGISTER_SECRET: process.env.SPAY_REGISTER_SECRET ?? '',
+
+  // Cloudinary — all media (images/video/docs) is stored here.
+  CLOUDINARY_CLOUD_NAME: required('CLOUDINARY_CLOUD_NAME'),
+  CLOUDINARY_API_KEY: required('CLOUDINARY_API_KEY'),
+  CLOUDINARY_API_SECRET: required('CLOUDINARY_API_SECRET'),
 } as const;
 
 export type Env = typeof env;

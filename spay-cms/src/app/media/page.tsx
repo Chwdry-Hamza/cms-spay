@@ -232,9 +232,9 @@ export default function MediaPage() {
                 item={openItem}
                 onSave={async (body) => {
                   try {
-                    const updated = await updateMedia.mutateAsync({ id: openItem._id, ...body });
+                    await updateMedia.mutateAsync({ id: openItem._id, ...body });
                     toast({ title: 'Saved', variant: 'success' });
-                    setOpenItem(updated);
+                    setOpenItem(null); // close the panel after a successful save
                   } catch (err) {
                     toast({ title: 'Save failed', description: apiErrorMessage(err), variant: 'danger' });
                   }
@@ -248,7 +248,6 @@ export default function MediaPage() {
             <Button variant="ghost" size="sm" className="text-danger hover:text-danger mr-auto" onClick={() => openItem && setDeleteId(openItem._id)}>
               <Trash2 />Delete
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setOpenItem(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -329,9 +328,6 @@ function MediaDetailsForm({
       <div>
         <Label htmlFor="m-filename">Display filename</Label>
         <Input id="m-filename" className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} />
-        <p className="text-[11px] text-fg-4 mt-1.5">
-          The public URL is fixed — renaming only changes how this file appears in lists and search.
-        </p>
       </div>
       <div>
         <Label htmlFor="m-alt" className="flex items-center justify-between">
@@ -339,7 +335,6 @@ function MediaDetailsForm({
           {!alt.trim() && <Badge variant="danger" size="sm">missing</Badge>}
         </Label>
         <Input id="m-alt" className="mt-1.5" value={alt} onChange={(e) => setAlt(e.target.value)} placeholder="Describe for accessibility & SEO" />
-        <p className="text-[11px] text-fg-4 mt-1.5">Aim for under 125 characters · descriptive · keyword-aware.</p>
       </div>
 
       <UsageList mediaId={item._id} />

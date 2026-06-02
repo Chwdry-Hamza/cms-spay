@@ -1,15 +1,11 @@
 import { Router } from 'express';
 import multer from 'multer';
-import sharp from 'sharp';
-import path from 'path';
-import fs from 'fs/promises';
-import crypto from 'crypto';
+import type { UploadApiResponse } from 'cloudinary';
 
+import { cloudinary } from '../config/cloudinary';
 import { Media } from '../models/Media';
 import { Page } from '../models/Page';
 import { Post } from '../models/Post';
-import { Setting } from '../models/Setting';
-import { env } from '../config/env';
 import { ApiError } from '../utils/ApiError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authRequired } from '../middleware/auth.middleware';
@@ -17,26 +13,47 @@ import { logger } from '../utils/logger';
 
 export const mediaRoutes = Router();
 
-// Multer — in-memory (we run sharp before writing to disk)
+// Multer — in-memory only; the buffer is streamed straight to Cloudinary.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
 });
 
-const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads');
+type Kind = 'image' | 'video' | 'document';
 
-function detectKind(mime: string): 'image' | 'video' | 'document' {
+function detectKind(mime: string): Kind {
   if (mime.startsWith('image/')) return 'image';
   if (mime.startsWith('video/')) return 'video';
   return 'document';
 }
 
-function safeName(original: string): string {
-  return original
-    .replace(/[^a-zA-Z0-9_.-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '')
-    .slice(0, 80);
+/** Cloudinary resource_type for a given media kind. */
+function resourceTypeFor(kind: Kind): 'image' | 'video' | 'raw' {
+  if (kind === 'image') return 'image';
+  if (kind === 'video') return 'video';
+  return 'raw';
+}
+
+/** Stream an in-memory file buffer to Cloudinary. */
+function uploadBuffer(buffer: Buffer, kind: Kind): Promise<UploadApiResponse> {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: 'spay',
+        resource_type: resourceTypeFor(kind),
+        use_filename: true,
+        unique_filename: true,
+      },
+      (err, result) => {
+        if (err || !result) {
+          reject(err ?? new Error('Cloudinary upload returned no result'));
+          return;
+        }
+        resolve(result);
+      },
+    );
+    stream.end(buffer);
+  });
 }
 
 mediaRoutes.use(authRequired);
@@ -58,7 +75,8 @@ mediaRoutes.get(
 
 /**
  * POST /api/media/upload
- * Multipart with one or many `files`. Returns the created Media docs.
+ * Multipart with one or many `files`. Each file is uploaded to Cloudinary and
+ * a Media doc is created storing the secure URL + public_id. Returns the docs.
  */
 mediaRoutes.post(
   '/upload',
@@ -67,60 +85,43 @@ mediaRoutes.post(
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     if (!files.length) throw ApiError.badRequest('No files uploaded');
 
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
-
     const created = [];
     for (const file of files) {
-      const id = crypto.randomBytes(8).toString('hex');
-      const ext = (path.extname(file.originalname) || '.bin').toLowerCase();
-      const base = safeName(path.basename(file.originalname, ext));
-      const stored = `${base}-${id}${ext}`;
-      const storedPath = path.join(UPLOAD_DIR, stored);
       const kind = detectKind(file.mimetype);
+      const result = await uploadBuffer(file.buffer, kind);
 
-      let width: number | undefined;
-      let height: number | undefined;
-      let variants: Record<string, string> = {};
-      let isWebP = file.mimetype === 'image/webp';
-
-      if (kind === 'image' && file.mimetype !== 'image/gif' && file.mimetype !== 'image/svg+xml') {
-        try {
-          const img = sharp(file.buffer);
-          const meta = await img.metadata();
-          width = meta.width;
-          height = meta.height;
-          await fs.writeFile(storedPath, file.buffer);
-
-          // also write a webp variant alongside
-          if (!isWebP) {
-            const webpName = `${base}-${id}.webp`;
-            await sharp(file.buffer).webp({ quality: 82 }).toFile(path.join(UPLOAD_DIR, webpName));
-            variants.webp = `${env.PUBLIC_URL}/uploads/${webpName}`;
-          }
-          // thumbnail
-          const thumbName = `${base}-${id}-thumb.webp`;
-          await sharp(file.buffer).resize(400, 400, { fit: 'cover' }).webp({ quality: 78 })
-            .toFile(path.join(UPLOAD_DIR, thumbName));
-          variants.thumbnail = `${env.PUBLIC_URL}/uploads/${thumbName}`;
-        } catch (err) {
-          logger.warn('[media] sharp failed; saving raw', err);
-          await fs.writeFile(storedPath, file.buffer);
-        }
-      } else {
-        await fs.writeFile(storedPath, file.buffer);
+      // For images, Cloudinary derives these on the fly from the same asset —
+      // no separate files stored. f_auto/q_auto = best format + quality.
+      const variants: Record<string, string> = {};
+      if (kind === 'image') {
+        variants.webp = cloudinary.url(result.public_id, {
+          resource_type: 'image',
+          secure: true,
+          fetch_format: 'auto',
+          quality: 'auto',
+        });
+        variants.thumbnail = cloudinary.url(result.public_id, {
+          resource_type: 'image',
+          secure: true,
+          width: 400,
+          height: 400,
+          crop: 'fill',
+          fetch_format: 'auto',
+          quality: 'auto',
+        });
       }
 
       const doc = await Media.create({
         name:     file.originalname,
-        filename: stored,
-        url:      `${env.PUBLIC_URL}/uploads/${stored}`,
+        filename: result.public_id, // Cloudinary public_id — used for deletion
+        url:      result.secure_url,
         type:     kind,
         mime:     file.mimetype,
-        size:     file.size,
-        width,
-        height,
+        size:     result.bytes ?? file.size,
+        width:    result.width,
+        height:   result.height,
         alt:      '',
-        isWebP,
+        isWebP:   (result.format ?? '').toLowerCase() === 'webp',
         variants,
       });
       created.push(doc);
@@ -148,10 +149,6 @@ mediaRoutes.patch(
  *
  * Returns every page/post that references this media item — used so editors
  * can see "Used by N pages" before deleting and avoid silent broken images.
- *
- * Reference paths checked:
- *   - featuredImage (page) — ObjectId ref
- *   - coverMedia / cover (post) — ObjectId ref + legacy URL field
  */
 mediaRoutes.get(
   '/:id/usage',
@@ -186,28 +183,22 @@ mediaRoutes.get(
   })
 );
 
-/** DELETE /api/media/:id */
+/** DELETE /api/media/:id — removes the doc and the Cloudinary asset. */
 mediaRoutes.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const media = await Media.findByIdAndDelete(req.params.id);
     if (!media) throw ApiError.notFound('Media not found');
 
-    // best-effort remove files (raw + variants)
-    const targets: string[] = [media.filename];
-    for (const v of Object.values(media.variants ?? {})) {
-      if (typeof v === 'string') {
-        const name = path.basename(new URL(v).pathname);
-        targets.push(name);
-      }
+    // Best-effort remove from Cloudinary (filename holds the public_id).
+    try {
+      await cloudinary.uploader.destroy(media.filename, {
+        resource_type: resourceTypeFor(media.type as Kind),
+      });
+    } catch (err) {
+      logger.warn('[media] cloudinary destroy failed', err);
     }
-    for (const f of targets) {
-      try {
-        await fs.unlink(path.join(UPLOAD_DIR, f));
-      } catch {
-        /* ignore */
-      }
-    }
+
     res.json({ ok: true });
   })
 );

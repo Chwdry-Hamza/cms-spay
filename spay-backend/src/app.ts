@@ -4,7 +4,6 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
-import path from 'path';
 
 import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
@@ -56,15 +55,6 @@ export function createApp(): Express {
       limit: 600,
       standardHeaders: 'draft-7',
       legacyHeaders: false,
-    })
-  );
-
-  // ─── Static uploads ───────────────────────────────────────────
-  app.use(
-    '/uploads',
-    express.static(path.resolve(process.cwd(), 'uploads'), {
-      maxAge: env.IS_PROD ? '7d' : 0,
-      fallthrough: false,
     })
   );
 
