@@ -108,6 +108,8 @@ export type Page = {
   status: ContentStatus;
   template: string;
   content: any;
+  /** Structured section overrides for code-driven pages (homepage). */
+  sections?: Record<string, any>;
   excerpt: string;
   seo: SEO;
   schema?: StructuredData;
@@ -637,6 +639,10 @@ export function useRevisions(entityType: 'page' | 'post', entityId: string | und
     queryFn: () =>
       api.get<{ items: Revision[]; total: number }>(`/api/revisions/${entityType}/${entityId}`).then((r) => r.data),
     enabled: !!entityId && entityId !== 'new',
+    // Prefetched on page load (the drawer mounts with the editor); keep it warm
+    // so opening History shows instantly instead of refetching each time.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

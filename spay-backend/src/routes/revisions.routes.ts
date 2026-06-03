@@ -12,7 +12,7 @@ export const revisionRoutes = Router();
 revisionRoutes.use(authRequired);
 
 /** Fields that should be copied from a snapshot back onto the live document */
-const PAGE_RESTORE_FIELDS = ['title', 'slug', 'status', 'template', 'content', 'excerpt', 'seo', 'featuredImage'] as const;
+const PAGE_RESTORE_FIELDS = ['title', 'slug', 'status', 'template', 'content', 'sections', 'excerpt', 'seo', 'featuredImage'] as const;
 const POST_RESTORE_FIELDS = ['title', 'slug', 'status', 'excerpt', 'content', 'cover', 'category', 'categoryName', 'tags', 'readTime', 'seo'] as const;
 
 /** GET /api/revisions/:entityType/:entityId — newest first */
@@ -74,6 +74,9 @@ revisionRoutes.post(
     for (const f of fields) {
       if (f in snapshot) (live as any)[f] = snapshot[f];
     }
+    // Mixed fields need an explicit modified flag so nested values persist.
+    if ('content' in snapshot) live.markModified('content');
+    if ('sections' in snapshot) live.markModified('sections');
     await live.save();
 
     // Push the change to the live site

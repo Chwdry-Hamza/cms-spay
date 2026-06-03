@@ -7,6 +7,8 @@ export const pageCreateSchema = z.object({
   status:   statusEnum.default('draft'),
   template: z.string().max(50).default('Content'),
   content:  z.any().optional(),
+  // Structured section overrides for code-driven pages (homepage etc.).
+  sections: z.any().optional(),
   excerpt:  z.string().max(500).default(''),
   seo:      seoSchema.optional(),
   schema:   structuredDataSchema.optional(),

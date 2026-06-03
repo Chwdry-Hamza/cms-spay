@@ -126,6 +126,9 @@ pageRoutes.put(
     const beforeSnapshot = existing.toObject();
 
     Object.assign(existing, body);
+    // Mixed fields need an explicit modified flag so nested changes persist.
+    if (body.sections !== undefined) existing.markModified('sections');
+    if (body.content !== undefined) existing.markModified('content');
     if (body.status === 'published' && !existing.publishedAt) {
       existing.publishedAt = new Date();
     }

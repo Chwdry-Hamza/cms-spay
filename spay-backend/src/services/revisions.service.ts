@@ -31,9 +31,17 @@ export function recordRevision(params: RecordParams): void {
     .catch((err) => logger.warn('[revision] failed to save', err));
 }
 
-/** Lists revisions for an entity, newest first. */
+/**
+ * Lists revisions for an entity, newest first.
+ *
+ * Excludes the (potentially large) `snapshot` blob at the DB level — the
+ * timeline UI only needs metadata, so projecting it out keeps the query and
+ * payload small and the History drawer fast. Use getRevision() for the full
+ * snapshot when restoring.
+ */
 export async function listRevisions(entityType: EntityType, entityId: string, limit = 50) {
   return Revision.find({ entityType, entityId })
+    .select('-snapshot')
     .sort({ createdAt: -1 })
     .limit(limit)
     .lean();

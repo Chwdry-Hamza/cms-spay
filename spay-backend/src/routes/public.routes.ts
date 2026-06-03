@@ -122,6 +122,9 @@ publicRoutes.get(
 
     const [items, total] = await Promise.all([
       Post.find(filter)
+        // List consumers (blog cards, footer dropdown, search) never need the
+        // full Tiptap body — excluding it keeps the query + payload small.
+        .select('-content')
         .sort({ publishedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -194,6 +197,9 @@ publicRoutes.get(
     const filter: any = { status: 'published', category: category._id };
     const [items, total] = await Promise.all([
       Post.find(filter)
+        // List consumers (blog cards, footer dropdown, search) never need the
+        // full Tiptap body — excluding it keeps the query + payload small.
+        .select('-content')
         .sort({ publishedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)

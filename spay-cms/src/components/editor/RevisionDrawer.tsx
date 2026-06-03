@@ -133,7 +133,6 @@ function RevisionRow({
             {rev.authorEmail && <span className="text-sm font-medium text-fg-1 truncate">{rev.authorEmail}</span>}
             {isFirst && <Badge variant="cyan" size="sm">Latest snapshot</Badge>}
           </div>
-          <p className="text-sm text-fg-2 leading-snug">{rev.label || 'Saved'}</p>
           <p className="text-[11px] text-fg-4 mt-1">
             {new Date(rev.createdAt).toLocaleString()} · {relativeTime(rev.createdAt)}
           </p>
@@ -143,10 +142,7 @@ function RevisionRow({
       {isConfirming && (
         <div className="px-6 pb-4 ml-9 -mt-1">
           <div className="rounded-spay-md border border-warning/30 bg-warning/[0.05] p-3">
-            <p className="text-sm font-medium text-fg-1 mb-1">Restore this revision?</p>
-            <p className="text-[11px] text-fg-3 leading-relaxed mb-3">
-              The current state will be snapshotted first, so this is reversible. After restoring, the page will be revalidated on the live site within seconds.
-            </p>
+            <p className="text-sm font-medium text-fg-1 mb-3">Restore this revision?</p>
             <div className="flex gap-2 justify-end">
               <Button variant="ghost" size="sm" onClick={onCancelRestore} disabled={restoring}>Cancel</Button>
               <Button size="sm" onClick={onConfirmRestore} disabled={restoring}>

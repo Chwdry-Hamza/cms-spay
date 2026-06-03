@@ -59,6 +59,11 @@ const PageSchema = new Schema(
     content:  { type: Schema.Types.Mixed, default: { type: 'doc', content: [] } },
     excerpt:  { type: String, default: '' },
 
+    // Structured content overrides for code-driven pages (e.g. the homepage).
+    // Free-form object keyed by section; the website merges these over its
+    // built-in defaults. Only meaningful for reserved/landing pages.
+    sections: { type: Schema.Types.Mixed, default: {} },
+
     seo:           { type: SEOSchema, default: () => ({}) },
     schema:        { type: StructuredDataSchema, default: () => ({}) },
     performance:   { type: PerformanceSchema, default: () => ({}) },

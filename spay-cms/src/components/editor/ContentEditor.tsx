@@ -6,7 +6,7 @@ import { useRouter, useParams, usePathname } from 'next/navigation';
 import {
   ArrowLeft, History, Eye, ChevronDown, Save, Send, CalendarClock,
   MoreHorizontal, CheckCircle2, RefreshCw, Trash2, Search as SearchIcon,
-  Wand2, Folder, Tag, X, Check,
+  Wand2, Folder, Tag, X, Check, Monitor,
 } from 'lucide-react';
 import type { Editor as TiptapEditorType } from '@tiptap/react';
 import { Button } from '@/components/ui/Button';
@@ -27,8 +27,11 @@ import { EditorToolbar } from './EditorToolbar';
 import { SEOPanel } from './SEOPanel';
 import { RevisionDrawer } from './RevisionDrawer';
 import { LinkPickerModal } from './LinkPickerModal';
+import { LivePreviewPanel } from './LivePreviewPanel';
+import { HomeContentEditor } from './HomeContentEditor';
 import { DeleteWithLinksDialog } from '@/components/DeleteWithLinksDialog';
 import { Drawer, DrawerContent } from '@/components/ui/Drawer';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import {
   usePage, useCreatePage, useUpdatePage, useDeletePage,
   usePost, useCreatePost, useUpdatePost, useDeletePost,
@@ -52,6 +55,9 @@ const RESERVED_PAGE_SLUGS = new Set([
   '/privacy-policy',
   '/prohibited-activities',
 ]);
+
+// Origin of the live website — used to preview pages inside the CMS.
+const SITE_ORIGIN = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
 const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
 
@@ -101,6 +107,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
   const [editor, setEditor] = React.useState<TiptapEditorType | null>(null);
   const [revisionsOpen, setRevisionsOpen] = React.useState(false);
   const [linkOpen, setLinkOpen] = React.useState(false);
+  const [livePreviewOpen, setLivePreviewOpen] = React.useState(false);
   const [seoOpen, setSeoOpen] = React.useState(true);
   // Separate state for the mobile/tablet slide-over (lg-). Desktop uses the
   // inline `seoOpen` aside.
@@ -145,6 +152,9 @@ export function ContentEditor({ kind }: { kind: Kind }) {
   // Reserved (code-driven) pages — editor body is read-only / hidden
   const isReservedPage =
     kind === 'page' && !!draft.slug && RESERVED_PAGE_SLUGS.has(draft.slug);
+  // The home / landing page — supports an in-CMS live preview of the website.
+  const isHomePage = kind === 'page' && draft.slug === '/';
+  const livePreviewUrl = `${SITE_ORIGIN}/`;
 
   // ─── Mutations ───────────────────────────────────────────────
   const persist = async (overrides: Partial<Page & Post> = {}) => {
@@ -159,7 +169,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
     // Strip _id/timestamps/category-object/etc that come from server data.
     const base = { ...draft, ...overrides, title: finalTitle, slug: finalSlug };
     const payload: any = kind === 'page'
-      ? pickFields(base, ['title', 'slug', 'status', 'template', 'content', 'excerpt', 'seo', 'schema', 'performance', 'featuredImage', 'scheduledAt'])
+      ? pickFields(base, ['title', 'slug', 'status', 'template', 'content', 'sections', 'excerpt', 'seo', 'schema', 'performance', 'featuredImage', 'scheduledAt'])
       : pickFields(base, ['title', 'slug', 'status', 'excerpt', 'content', 'cover', 'coverMedia', 'category', 'tags', 'readTime', 'seo', 'schema', 'performance', 'scheduledAt']);
 
     // Coerce populated refs (category / featuredImage / coverMedia) down to id strings
@@ -459,14 +469,42 @@ export function ContentEditor({ kind }: { kind: Kind }) {
               )}
 
               {isReservedPage ? (
-                <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
-                  <p className="text-sm text-fg-3">
-                    Body editor disabled for this page.
-                  </p>
-                  <p className="text-[11px] text-fg-4 mt-1">
-                    Use the SEO panel on the right to update title, description, and social previews.
-                  </p>
-                </div>
+                isHomePage ? (
+                  livePreviewOpen ? (
+                    <LivePreviewPanel
+                      url={livePreviewUrl}
+                      sections={draft.sections}
+                      onClose={() => setLivePreviewOpen(false)}
+                    />
+                  ) : (
+                    <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
+                      <p className="text-sm text-fg-3">
+                        Edit the landing page content in the <span className="text-fg-1 font-medium">Content</span> tab on the right.
+                      </p>
+                      <p className="text-[11px] text-fg-4 mt-1">
+                        Layout and animations stay in code. Save (and publish) to push changes live.
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-5"
+                        onClick={() => setLivePreviewOpen(true)}
+                      >
+                        <Monitor />
+                        Live Preview
+                      </Button>
+                    </div>
+                  )
+                ) : (
+                  <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
+                    <p className="text-sm text-fg-3">
+                      Body editor disabled for this page.
+                    </p>
+                    <p className="text-[11px] text-fg-4 mt-1">
+                      Use the SEO panel on the right to update title, description, and social previews.
+                    </p>
+                  </div>
+                )
               ) : (
                 <TiptapEditor
                   value={draft.content || emptyDoc}
@@ -526,12 +564,36 @@ export function ContentEditor({ kind }: { kind: Kind }) {
                 }}
               />
             );
+
+            // On the homepage, the right panel hosts BOTH the content editor
+            // and the SEO panel via a Content / SEO tab switcher. Everywhere
+            // else it's just the SEO panel.
+            const rightPanel = isHomePage ? (
+              <Tabs defaultValue="content" className="flex flex-col h-full">
+                <TabsList className="mx-4 mt-3 self-start">
+                  <TabsTrigger value="content">Content</TabsTrigger>
+                  <TabsTrigger value="seo">SEO</TabsTrigger>
+                </TabsList>
+                <TabsContent value="content" className="mt-3 flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+                  <HomeContentEditor
+                    value={draft.sections}
+                    onChange={(next) => update({ sections: next } as any)}
+                  />
+                </TabsContent>
+                <TabsContent value="seo" className="mt-3 flex-1 min-h-0 overflow-hidden">
+                  {seoPanel}
+                </TabsContent>
+              </Tabs>
+            ) : (
+              seoPanel
+            );
+
             return (
               <>
                 {/* Desktop: inline column */}
                 {seoOpen && (
                   <aside className="hidden lg:block w-[380px] xl:w-[420px] border-l border-line shrink-0 bg-surface-deeper/40 overflow-hidden">
-                    {seoPanel}
+                    {rightPanel}
                   </aside>
                 )}
 
@@ -543,7 +605,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
                     side="right"
                     className="w-full sm:max-w-md p-0 bg-surface-deeper lg:hidden"
                   >
-                    {seoDrawerOpen && seoPanel}
+                    {seoDrawerOpen && rightPanel}
                   </DrawerContent>
                 </Drawer>
               </>
