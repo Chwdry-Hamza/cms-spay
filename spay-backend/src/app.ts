@@ -43,7 +43,7 @@ export function createApp(): Express {
     })
   );
   app.use(cookieParser());
-  // strict:false so top-level JSON primitives (e.g. the `robots` setting, a
+  // strict:false and so top-level JSON primitives (e.g. the `robots` setting, a
   // plain string) are accepted — strict mode only allows objects/arrays.
   app.use(express.json({ limit: '2mb', strict: false }));
   app.use(express.urlencoded({ extended: true }));
