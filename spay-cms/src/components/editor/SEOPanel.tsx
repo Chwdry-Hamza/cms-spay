@@ -21,7 +21,9 @@ import { type SEO, type MediaItem, type StructuredData, emptyStructuredData, typ
 import { MediaPickerModal } from '@/components/MediaPickerModal';
 import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Activity } from 'lucide-react';
 
-const SITE_ORIGIN = 'https://spay.finance';
+// Used to build the canonical-URL preview. Driven by the deployed site URL so
+// canonicals match the real domain; falls back to the production domain.
+const SITE_ORIGIN = (process.env.NEXT_PUBLIC_SITE_URL || 'https://spay.finance').replace(/\/+$/, '');
 
 const defaultSEO: SEO = {
   title: '', description: '', canonical: '', noindex: false, nofollow: false,

@@ -190,7 +190,10 @@ publicRoutes.get(
         100,
         Number.isFinite(requestedLimit) && requestedLimit > 0
           ? requestedLimit
-          : (category as any).pageSize || 12,
+          // Default to 6/page to match the blog index (PAGE_SIZE) so categories
+          // paginate at the same threshold. A per-category `pageSize` override
+          // still wins when set.
+          : (category as any).pageSize || 6,
       ),
     );
 
@@ -235,11 +238,26 @@ publicRoutes.get(
 );
 
 // ─── Settings (site-wide SEO, analytics) ──────────────────────────
+// Only these keys may be read publicly. Anything else (or a secret stored as a
+// setting in future) returns null rather than leaking via this open endpoint.
+const PUBLIC_SETTING_KEYS = new Set([
+  'seo',
+  'crawl',
+  'organization',
+  'analytics',
+  'robots',
+]);
+
 publicRoutes.get(
   '/settings/:key',
   asyncHandler(async (req, res) => {
-    const doc = await Setting.findOne({ key: req.params.key }).lean();
+    const key = String(req.params.key);
     res.set('Cache-Control', 'public, max-age=300');
+    if (!PUBLIC_SETTING_KEYS.has(key)) {
+      res.json(null);
+      return;
+    }
+    const doc = await Setting.findOne({ key }).lean();
     res.json(doc?.value ?? null);
   })
 );

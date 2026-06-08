@@ -5,6 +5,8 @@ const nextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'picsum.photos' },
+      // All CMS-uploaded media is served from Cloudinary.
+      { protocol: 'https', hostname: 'res.cloudinary.com' },
     ],
   },
 };
