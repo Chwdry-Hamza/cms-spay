@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   Search, MoreHorizontal, ArrowRightLeft, Trash2, Check, AlertOctagon,
-  X, ArrowRight, Copy,
+  X, ArrowRight,
 } from 'lucide-react';
 // (AlertOctagon still used by the per-row warning icon)
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toaster';
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenuItem,
 } from '@/components/ui/Dropdown';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -106,8 +106,6 @@ export default function Logs404Page() {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild><Button variant="ghost" size="iconSm"><MoreHorizontal /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onSelect={() => { navigator.clipboard.writeText(l.url); toast({ title: 'URL copied' }); }}><Copy />Copy URL</DropdownMenuItem>
-                            <DropdownMenuSeparator />
                             <DropdownMenuItem destructive onSelect={async () => {
                               try {
                                 await deleteLog.mutateAsync(l._id);

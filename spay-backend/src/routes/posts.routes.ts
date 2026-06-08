@@ -108,6 +108,10 @@ postRoutes.post(
       publishedAt: body.status === 'published' ? new Date() : undefined,
     });
 
+    await post.populate([
+      { path: 'coverMedia', select: 'name url alt variants width height' },
+      { path: 'category', select: 'name slug color' },
+    ]);
     triggerContentRevalidate(['/blog', `/blog/${slug}`], 'post');
     res.status(201).json(post);
   })
@@ -179,6 +183,13 @@ postRoutes.put(
     if (beforeSlug !== existing.slug) paths.add(`/blog/${beforeSlug}`);
     triggerContentRevalidate(Array.from(paths), 'post');
 
+    // Populate refs so the PUT response matches GET /:id. Without this the
+    // editor's cached copy holds bare ObjectIds and the cover-image preview
+    // renders empty after save until a full refetch.
+    await existing.populate([
+      { path: 'coverMedia', select: 'name url alt variants width height' },
+      { path: 'category', select: 'name slug color' },
+    ]);
     res.json(existing.toObject());
   })
 );

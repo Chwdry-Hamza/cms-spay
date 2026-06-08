@@ -68,6 +68,8 @@ export type SEO = {
 };
 
 export type StructuredData = {
+  // 'none' is retained for backward-compat with already-saved docs, but it is
+  // no longer offered in the picker — new content defaults to 'article'.
   type: 'none' | 'article' | 'faq' | 'service' | 'custom';
   faq: { q: string; a: string }[];
   service: {
@@ -81,7 +83,7 @@ export type StructuredData = {
 };
 
 export const emptyStructuredData: StructuredData = {
-  type: 'none',
+  type: 'article',
   faq: [],
   service: { name: '', description: '', serviceType: '', areaServed: '', priceRange: '' },
   customJsonLd: '',
@@ -90,15 +92,11 @@ export const emptyStructuredData: StructuredData = {
 export type Performance = {
   skipAnalytics: boolean;
   skipCustomScripts: boolean;
-  disableCache: boolean;
-  lazyLoadImages: boolean;
 };
 
 export const emptyPerformance: Performance = {
   skipAnalytics: false,
   skipCustomScripts: false,
-  disableCache: false,
-  lazyLoadImages: true,
 };
 
 export type Page = {
@@ -234,14 +232,23 @@ export function usePage(id: string | undefined) {
   });
 }
 
+/**
+ * Invalidate every cache a page change can touch, so each section shows the
+ * change the moment you return to it: the pages list, the dashboard stats
+ * (which count pages + missing-SEO), and the sitemap. (Revision history is
+ * invalidated by the caller since it needs the page id.)
+ */
+function invalidatePageRelated(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['pages'] });
+  qc.invalidateQueries({ queryKey: ['stats'] });
+  qc.invalidateQueries({ queryKey: ['sitemap'] });
+}
+
 export function useCreatePage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Partial<Page>) => api.post<Page>('/api/pages', body).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pages'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidatePageRelated(qc),
   });
 }
 
@@ -250,8 +257,8 @@ export function useUpdatePage(id: string) {
   return useMutation({
     mutationFn: (body: Partial<Page>) => api.put<Page>(`/api/pages/${id}`, body).then((r) => r.data),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['pages'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
+      invalidatePageRelated(qc);
+      qc.invalidateQueries({ queryKey: ['revisions', 'page', id] });
       qc.setQueryData(['page', id], data);
     },
   });
@@ -261,10 +268,7 @@ export function useDeletePage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/pages/${id}`).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pages'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidatePageRelated(qc),
   });
 }
 
@@ -272,10 +276,7 @@ export function useDuplicatePage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post(`/api/pages/${id}/duplicate`).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pages'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidatePageRelated(qc),
   });
 }
 
@@ -298,14 +299,25 @@ export function usePost(id: string | undefined) {
   });
 }
 
+/**
+ * Invalidate every cache a post change can touch, so each section shows the
+ * change the moment you return to it: the posts list, category post-counts
+ * (the backend bumps them on create/move/delete), the dashboard stats, and the
+ * sitemap. (Revision history is invalidated by the caller since it needs the
+ * post id.)
+ */
+function invalidatePostRelated(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['posts'] });
+  qc.invalidateQueries({ queryKey: ['categories'] });
+  qc.invalidateQueries({ queryKey: ['stats'] });
+  qc.invalidateQueries({ queryKey: ['sitemap'] });
+}
+
 export function useCreatePost() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Partial<Post>) => api.post<Post>('/api/posts', body).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['posts'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidatePostRelated(qc),
   });
 }
 
@@ -314,8 +326,8 @@ export function useUpdatePost(id: string) {
   return useMutation({
     mutationFn: (body: Partial<Post>) => api.put<Post>(`/api/posts/${id}`, body).then((r) => r.data),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['posts'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
+      invalidatePostRelated(qc);
+      qc.invalidateQueries({ queryKey: ['revisions', 'post', id] });
       qc.setQueryData(['post', id], data);
     },
   });
@@ -325,10 +337,7 @@ export function useDeletePost() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/posts/${id}`).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['posts'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidatePostRelated(qc),
   });
 }
 
@@ -341,14 +350,20 @@ export function useCategories() {
   });
 }
 
+function invalidateCategoryRelated(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['categories'] });
+  // A category rename/delete changes how posts display, and the dashboard
+  // summarises content — refresh both so they're never stale on return.
+  qc.invalidateQueries({ queryKey: ['posts'] });
+  qc.invalidateQueries({ queryKey: ['stats'] });
+  qc.invalidateQueries({ queryKey: ['sitemap'] });
+}
+
 export function useCreateCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Partial<Category>) => api.post<Category>('/api/categories', body).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['categories'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidateCategoryRelated(qc),
   });
 }
 
@@ -357,10 +372,7 @@ export function useUpdateCategory() {
   return useMutation({
     mutationFn: ({ id, ...body }: Partial<Category> & { id: string }) =>
       api.put<Category>(`/api/categories/${id}`, body).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['categories'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidateCategoryRelated(qc),
   });
 }
 
@@ -368,10 +380,7 @@ export function useDeleteCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/categories/${id}`).then((r) => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['categories'] });
-      qc.invalidateQueries({ queryKey: ['sitemap'] });
-    },
+    onSuccess: () => invalidateCategoryRelated(qc),
   });
 }
 
@@ -395,7 +404,10 @@ export function useUploadMedia() {
       });
       return res.data.items;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['media'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['media'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -404,7 +416,11 @@ export function useUpdateMedia() {
   return useMutation({
     mutationFn: ({ id, ...body }: Partial<MediaItem> & { id: string }) =>
       api.patch<MediaItem>(`/api/media/${id}`, body).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['media'] }),
+    onSuccess: () => {
+      // alt-text edits move the dashboard's "images missing alt" count.
+      qc.invalidateQueries({ queryKey: ['media'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -412,7 +428,10 @@ export function useDeleteMedia() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/media/${id}`).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['media'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['media'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -447,36 +466,10 @@ export function useCreateRedirect() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Partial<Redirect>) => api.post<Redirect>('/api/redirects', body).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['redirects'] }),
-  });
-}
-
-export function useUpdateRedirect() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...body }: Partial<Redirect> & { id: string }) =>
-      api.put<Redirect>(`/api/redirects/${id}`, body).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['redirects'] }),
-  });
-}
-
-export type BulkRedirectRow = {
-  from: string;
-  to: string;
-};
-
-export type BulkRedirectResult = {
-  ok: boolean;
-  summary: { received: number; created: number; updated: number; skipped: number; errors: number };
-  errors: { row: number; from: string; reason: string }[];
-};
-
-export function useBulkCreateRedirects() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: { rows: BulkRedirectRow[]; conflictStrategy: 'skip' | 'update' }) =>
-      api.post<BulkRedirectResult>('/api/redirects/bulk', payload).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['redirects'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['redirects'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -484,7 +477,10 @@ export function useDeleteRedirect() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/redirects/${id}`).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['redirects'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['redirects'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -504,7 +500,10 @@ export function useResolveLog404() {
   return useMutation({
     mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
       api.patch(`/api/logs-404/${id}`, { resolved }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['logs-404'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['logs-404'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -512,7 +511,10 @@ export function useDeleteLog404() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/logs-404/${id}`).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['logs-404'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['logs-404'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    },
   });
 }
 
@@ -527,8 +529,17 @@ export function useSetting<T = any>(key: string) {
 export function useUpdateSetting() {
   const qc = useQueryClient();
   return useMutation({
+    // The backend stores the raw request body as the setting value. We send a
+    // pre-serialized JSON body (with an identity transform so axios doesn't
+    // re-encode it) so STRING settings like `robots` round-trip correctly —
+    // axios's default string handling produces a body the JSON parser rejects.
     mutationFn: ({ key, value }: { key: string; value: any }) =>
-      api.put(`/api/settings/${key}`, value).then((r) => r.data),
+      api
+        .put(`/api/settings/${key}`, JSON.stringify(value), {
+          headers: { 'Content-Type': 'application/json' },
+          transformRequest: [(d) => d],
+        })
+        .then((r) => r.data),
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ['setting', vars.key] }),
   });
 }

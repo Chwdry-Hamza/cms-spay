@@ -1,70 +1,34 @@
 'use client';
 
 import React from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Search, Plus, MoreHorizontal, ArrowRight, Trash2, Pencil, X, ArrowRightLeft, Upload,
+  Search, ArrowRight, Trash2, X, ArrowRightLeft,
 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Label } from '@/components/ui/Label';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toaster';
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator,
-} from '@/components/ui/Dropdown';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
-import {
-  useRedirects, useCreateRedirect, useUpdateRedirect, useDeleteRedirect,
-  type Redirect,
-} from '@/lib/queries';
+import { useRedirects, useDeleteRedirect } from '@/lib/queries';
 import { apiErrorMessage } from '@/lib/api';
 import { relativeTime } from '@/lib/utils';
-import { CSVImportModal } from '@/components/redirects/CSVImportModal';
 
 export default function RedirectsPage() {
   const [query, setQuery] = React.useState('');
-  const [modal, setModal] = React.useState<{ open: boolean; editing?: Redirect }>({ open: false });
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
-  const [importOpen, setImportOpen] = React.useState(false);
   const { toast } = useToast();
 
   const { data = [], isLoading } = useRedirects(query || undefined);
-  const create = useCreateRedirect();
-  const update = useUpdateRedirect();
   const del = useDeleteRedirect();
-
-  // Auto-open the "New redirect" modal when arriving via /redirects?new=1
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  React.useEffect(() => {
-    if (searchParams.get('new') === '1') {
-      setModal({ open: true });
-      router.replace('/redirects');
-    }
-  }, [searchParams, router]);
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Redirects"
-        actions={
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setImportOpen(true)}>
-              <Upload />Import CSV
-            </Button>
-            <Button size="sm" onClick={() => setModal({ open: true })}>
-              <Plus />New redirect
-            </Button>
-          </>
-        }
-      />
+      <PageHeader title="Redirects" />
 
       <Card>
         <div className="px-4 py-3 border-b border-line flex flex-wrap items-center gap-2">
@@ -86,7 +50,7 @@ export default function RedirectsPage() {
               <EmptyState
                 icon={<ArrowRightLeft />}
                 title={query ? 'No matching redirects' : 'No redirects yet'}
-                description="Add a redirect to forward old URLs."
+                description="Redirects are created automatically when you change a page or post's slug, so old links keep working."
               />
             </div>
           ) : (
@@ -108,14 +72,9 @@ export default function RedirectsPage() {
                     <td className="px-2 py-3 font-mono text-xs text-cyan-300 truncate max-w-[260px]">{r.to}</td>
                     <td className="px-2 py-3 hidden sm:table-cell text-xs text-fg-3 whitespace-nowrap">{relativeTime(r.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild><Button variant="ghost" size="iconSm"><MoreHorizontal /></Button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => setModal({ open: true, editing: r })}><Pencil />Edit</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem destructive onSelect={() => setDeleteId(r._id)}><Trash2 />Delete</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <Button variant="ghost" size="iconSm" onClick={() => setDeleteId(r._id)} aria-label="Delete redirect">
+                        <Trash2 />
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -124,30 +83,6 @@ export default function RedirectsPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* CSV import */}
-      <CSVImportModal open={importOpen} onOpenChange={setImportOpen} />
-
-      {/* Create/Edit */}
-      <RedirectModal
-        state={modal}
-        onClose={() => setModal({ open: false })}
-        onSubmit={async (body) => {
-          try {
-            if (modal.editing) {
-              await update.mutateAsync({ id: modal.editing._id, ...body });
-              toast({ title: 'Redirect updated', variant: 'success' });
-            } else {
-              await create.mutateAsync(body);
-              toast({ title: 'Redirect created', variant: 'success' });
-            }
-            setModal({ open: false });
-          } catch (err) {
-            toast({ title: 'Save failed', description: apiErrorMessage(err), variant: 'danger' });
-          }
-        }}
-        submitting={create.isPending || update.isPending}
-      />
 
       {/* Delete */}
       <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
@@ -172,71 +107,5 @@ export default function RedirectsPage() {
         </DialogContent>
       </Dialog>
     </PageContainer>
-  );
-}
-
-function RedirectModal({
-  state, onClose, onSubmit, submitting,
-}: {
-  state: { open: boolean; editing?: Redirect };
-  onClose: () => void;
-  onSubmit: (body: Partial<Redirect>) => void;
-  submitting: boolean;
-}) {
-  const editing = state.editing;
-  const [from, setFrom] = React.useState('');
-  const [to, setTo] = React.useState('');
-
-  React.useEffect(() => {
-    if (state.open) {
-      setFrom(editing?.from ?? '');
-      setTo(editing?.to ?? '');
-    }
-  }, [state.open, editing]);
-
-  return (
-    <Dialog open={state.open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit redirect' : 'Add redirect'}</DialogTitle>
-        </DialogHeader>
-
-        {(() => {
-          const fromTrim = from.trim();
-          const toTrim = to.trim();
-          const fromInvalid = fromTrim.length > 0 && !fromTrim.startsWith('/');
-          // "to" is allowed to be /relative OR an http(s):// absolute URL.
-          const toInvalid = toTrim.length > 0 && !toTrim.startsWith('/') && !/^https?:\/\//i.test(toTrim);
-          const canSubmit = !!fromTrim && !!toTrim && !fromInvalid && !toInvalid && !submitting;
-
-          return (
-            <>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="from">From URL</Label>
-                  <Input id="from" className="mt-1.5 font-mono" placeholder="/old-path" value={from} onChange={(e) => setFrom(e.target.value)} autoFocus />
-                  {fromInvalid && <p className="text-[11px] text-danger mt-1.5">From URL must start with <code className="font-mono">/</code></p>}
-                </div>
-                <div>
-                  <Label htmlFor="to">To URL</Label>
-                  <Input id="to" className="mt-1.5 font-mono" placeholder="/new-path or https://…" value={to} onChange={(e) => setTo(e.target.value)} />
-                  {toInvalid && <p className="text-[11px] text-danger mt-1.5">To URL must start with <code className="font-mono">/</code> or <code className="font-mono">https://</code></p>}
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button variant="ghost" onClick={onClose} disabled={submitting}>Cancel</Button>
-                <Button
-                  onClick={() => onSubmit({ from: fromTrim, to: toTrim })}
-                  disabled={!canSubmit}
-                >
-                  <Plus />{submitting ? 'Saving…' : 'Save redirect'}
-                </Button>
-              </DialogFooter>
-            </>
-          );
-        })()}
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -24,7 +24,6 @@ const ICON_BY_LABEL: Record<string, React.ComponentType<any>> = {
   'Go to SEO Settings': Search,
   'New page': Plus,
   'New blog post': Plus,
-  'New redirect': Plus,
   'Upload media': Plus,
 };
 

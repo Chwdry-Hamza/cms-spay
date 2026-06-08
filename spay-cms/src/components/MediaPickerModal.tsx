@@ -55,15 +55,21 @@ export function MediaPickerModal(props: Props) {
     [query, accept]
   );
 
-  const { data = [], isLoading } = useMedia(filter);
+  const { data = [], isLoading, refetch } = useMedia(filter);
 
-  // Reset selection when reopened
+  // Reset selection when reopened, and always pull the freshest library so
+  // images uploaded since the editor loaded (e.g. in the Media Library tab)
+  // show up immediately — no page reload needed.
   React.useEffect(() => {
     if (open) {
       setPicked(null);
       setPickedMany([]);
       setQuery('');
+      void refetch();
     }
+    // refetch identity changes with the search filter; depending on it here
+    // would clear the user's query mid-type, so intentionally only run on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const togglePickMany = (m: MediaItem) => {
@@ -88,8 +94,8 @@ export function MediaPickerModal(props: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6">
+      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]">
+        <DialogHeader className="px-6 pt-6 shrink-0">
           <DialogTitle>
             {multiple ? 'Pick images for the gallery' : 'Pick from media library'}
           </DialogTitle>
@@ -100,7 +106,7 @@ export function MediaPickerModal(props: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 pt-4 flex flex-wrap items-center gap-2">
+        <div className="px-6 pt-4 flex flex-wrap items-center gap-2 shrink-0">
           <div className="flex-1 min-w-[220px] max-w-md">
             <Input
               leftIcon={<Search />}
@@ -112,7 +118,7 @@ export function MediaPickerModal(props: Props) {
           </div>
         </div>
 
-        <div className="px-6 pt-4 pb-4 max-h-[420px] overflow-y-auto">
+        <div className="px-6 pt-4 pb-4 flex-1 min-h-0 overflow-y-auto">
           {isLoading ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
               {Array.from({ length: 10 }).map((_, i) => (
@@ -193,7 +199,7 @@ export function MediaPickerModal(props: Props) {
 
         {/* Selected file preview (single mode) */}
         {!multiple && picked && (
-          <div className="border-t border-line bg-surface/40 px-6 py-3 flex items-center gap-3">
+          <div className="border-t border-line bg-surface/40 px-6 py-3 flex items-center gap-3 shrink-0">
             <div className="size-12 rounded-spay-sm overflow-hidden border border-line bg-surface shrink-0">
               {picked.type === 'image' ? (
                 <img src={picked.variants?.thumbnail || picked.url} alt={picked.alt} className="w-full h-full object-cover" />
@@ -213,7 +219,7 @@ export function MediaPickerModal(props: Props) {
 
         {/* Selection count strip (multi mode) */}
         {multiple && (
-          <div className="border-t border-line bg-surface/40 px-6 py-3 flex items-center gap-3">
+          <div className="border-t border-line bg-surface/40 px-6 py-3 flex items-center gap-3 shrink-0">
             <span className="text-sm text-fg-1">
               <span className="text-cyan-300 font-semibold">{pickedMany.length}</span> selected
               <span className="text-fg-4 text-xs ml-2">({minPick}–{maxPick} required)</span>
@@ -226,7 +232,7 @@ export function MediaPickerModal(props: Props) {
           </div>
         )}
 
-        <DialogFooter className="px-6 pb-6 pt-3 border-t border-line">
+        <DialogFooter className="px-6 pb-6 pt-3 border-t border-line shrink-0">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             onClick={handleConfirm}

@@ -120,7 +120,7 @@ export default function SitemapPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" asChild>
-                  <a href="http://localhost:3000/robots.txt" target="_blank" rel="noopener noreferrer">
+                  <a href={`${SITE_ORIGIN}/robots.txt`} target="_blank" rel="noopener noreferrer">
                     <ExternalLink />View live
                   </a>
                 </Button>

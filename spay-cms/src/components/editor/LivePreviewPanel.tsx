@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Monitor, RotateCw, ExternalLink, X } from 'lucide-react';
+import { Monitor, RotateCw, Pencil, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
 /**
@@ -23,20 +23,35 @@ const DESKTOP_WIDTH = 1280;
 export function LivePreviewPanel({
   url,
   sections,
-  onClose,
+  editable = false,
+  onInlineEdit,
+  onPickImage,
 }: {
   url: string;
   sections?: Record<string, any>;
-  onClose: () => void;
+  /** Homepage: show the Edit/Preview toggle and accept edits from the iframe. */
+  editable?: boolean;
+  /** A text/link-URL edit committed in the preview: write it into `sections`. */
+  onInlineEdit?: (path: string, value: string) => void;
+  /** The preview asked to change an image at `path`: open the media picker. */
+  onPickImage?: (path: string) => void;
 }) {
   const viewportRef = React.useRef<HTMLDivElement>(null);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [size, setSize] = React.useState({ w: 0, h: 0 });
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [editing, setEditing] = React.useState(false);
 
   // Always post the freshest sections, without re-binding listeners per keystroke.
   const sectionsRef = React.useRef(sections);
   sectionsRef.current = sections;
+  // Keep edit callbacks fresh inside the long-lived message listener.
+  const editRef = React.useRef(onInlineEdit);
+  editRef.current = onInlineEdit;
+  const pickRef = React.useRef(onPickImage);
+  pickRef.current = onPickImage;
+  const editingRef = React.useRef(editing);
+  editingRef.current = editing;
 
   const previewUrl = url + (url.includes('?') ? '&' : '?') + 'preview=1';
   const targetOrigin = React.useMemo(() => {
@@ -54,16 +69,35 @@ export function LivePreviewPanel({
     );
   }, [targetOrigin]);
 
-  // When the preview page mounts it announces itself; push the current draft.
+  const postMode = React.useCallback(() => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'spay:preview-edit-mode', editing: editingRef.current },
+      targetOrigin,
+    );
+  }, [targetOrigin]);
+
+  // Listen for the iframe announcing readiness and for edits coming back from it.
   React.useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.data && typeof e.data === 'object' && e.data.type === 'spay:preview-ready') {
+      const d = e.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === 'spay:preview-ready') {
         postSections();
+        postMode();
+      } else if (d.type === 'spay:preview-edit' && typeof d.path === 'string') {
+        editRef.current?.(d.path, d.value);
+      } else if (d.type === 'spay:preview-pick-image' && typeof d.path === 'string') {
+        pickRef.current?.(d.path);
       }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [postSections]);
+  }, [postSections, postMode]);
+
+  // Push edit-mode changes to the iframe as the user toggles.
+  React.useEffect(() => {
+    postMode();
+  }, [editing, postMode]);
 
   // Push edits to the iframe as they happen (debounced so typing stays smooth).
   React.useEffect(() => {
@@ -99,14 +133,19 @@ export function LivePreviewPanel({
           <Monitor /> Live
         </span>
         <span className="flex-1 min-w-0 truncate font-mono text-xs text-fg-3">{url}</span>
+        {editable && (
+          <Button
+            variant={editing ? 'primary' : 'secondary'}
+            size="sm"
+            onClick={() => setEditing((v) => !v)}
+            className="gap-1.5"
+          >
+            {editing ? <Pencil /> : <Eye />}
+            {editing ? 'Editing' : 'Edit'}
+          </Button>
+        )}
         <Button variant="ghost" size="iconSm" onClick={() => setReloadKey((k) => k + 1)} aria-label="Refresh preview">
           <RotateCw />
-        </Button>
-        <Button variant="ghost" size="iconSm" asChild aria-label="Open in new tab">
-          <a href={url} target="_blank" rel="noopener noreferrer"><ExternalLink /></a>
-        </Button>
-        <Button variant="ghost" size="iconSm" onClick={onClose} aria-label="Close preview">
-          <X />
         </Button>
       </div>
 

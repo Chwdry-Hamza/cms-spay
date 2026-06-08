@@ -12,11 +12,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
           queries: {
             retry: 1,
             refetchOnWindowFocus: false,
-            refetchOnMount: false,
-            // Revisits within 5 minutes serve straight from cache (no skeleton,
-            // no roundtrip). Cached data is kept around for 30 minutes after
-            // last use, so quick switches between Pages/Posts/Categories etc.
-            // never have to refetch.
+            // Refetch on mount only when the cached data is stale. Unchanged
+            // sections stay instant within the 5-min staleTime window, but a
+            // list that a mutation marked stale (e.g. after creating/saving a
+            // post) refetches the moment you navigate back to it — so new rows
+            // appear immediately without a manual reload. (Leaving this `false`
+            // suppressed that refetch, which is why edits only showed up after
+            // a hard reload.)
+            refetchOnMount: true,
             staleTime: 5 * 60 * 1000,
             gcTime: 30 * 60 * 1000,
           },

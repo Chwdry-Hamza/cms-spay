@@ -142,12 +142,31 @@ export const HOME_CONTENT_DEFAULTS: Record<string, any> = {
     appStoreUrl: 'https://apps.apple.com/app/sicash',
     playStoreUrl: 'https://play.google.com/store/apps/details?id=com.sicash',
   },
+  bottomNav: {
+    logoSrc: '/Spay.png',
+    logoAlt: 'SPay',
+    ctaLabel: 'GET SPAY APP',
+    ctaMobileLabel: 'GET THE APP',
+    ctaUrl: 'https://apps.apple.com/app/sicash',
+    items: [
+      { label: 'How to pay', icon: 'card', href: '#payment' },
+      { label: 'Send', icon: 'arrow-right', href: '#transfer' },
+      { label: 'Crypto', icon: 'branch', href: '#crypto' },
+    ],
+  },
+  cookieConsent: {
+    message:
+      'We use cookies to improve your experience and analyze traffic. See our Privacy Policy.',
+    acceptLabel: 'Accept',
+    declineLabel: 'Decline',
+    learnMoreUrl: '/privacy-policy',
+  },
 };
 
 // ─── Declarative schema that drives the editor form ──────────────────────────
 
 export type Field =
-  | { type: 'text' | 'textarea' | 'image'; key: string; label: string }
+  | { type: 'text' | 'textarea' | 'image'; key: string; label: string; optional?: boolean }
   | { type: 'group'; key: string; label: string; fields: Field[] }
   | { type: 'objectList'; key: string; label: string; itemLabel: string; itemFields: Field[] }
   | { type: 'stringList'; key: string; label: string; itemLabel: string; itemType?: 'text' | 'image' };

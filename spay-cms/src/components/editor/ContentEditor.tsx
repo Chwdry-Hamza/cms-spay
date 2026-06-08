@@ -29,6 +29,15 @@ import { RevisionDrawer } from './RevisionDrawer';
 import { LinkPickerModal } from './LinkPickerModal';
 import { LivePreviewPanel } from './LivePreviewPanel';
 import { HomeContentEditor } from './HomeContentEditor';
+import { MediaPickerModal } from '@/components/MediaPickerModal';
+import { resolveHomeContent } from '@/lib/homeContent';
+import { setAtPath } from '@/lib/setAtPath';
+import { ABOUT_CONTENT_SCHEMA, resolveAboutContent } from '@/lib/aboutContent';
+import { SUPPORT_CONTENT_SCHEMA, resolveSupportContent } from '@/lib/supportContent';
+import {
+  LEGAL_CONTENT_SCHEMA, resolveProhibitedContent, resolvePrivacyContent, resolveEsignContent,
+  resolveCardTermsContent,
+} from '@/lib/legalContent';
 import { DeleteWithLinksDialog } from '@/components/DeleteWithLinksDialog';
 import { Drawer, DrawerContent } from '@/components/ui/Drawer';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
@@ -52,14 +61,24 @@ const RESERVED_PAGE_SLUGS = new Set([
   '/',
   '/about',
   '/card-terms',
+  '/e-sign-consent',
   '/privacy-policy',
   '/prohibited-activities',
+  '/support',
 ]);
 
 // Origin of the live website — used to preview pages inside the CMS.
 const SITE_ORIGIN = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
 const emptyDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
+
+/** Collect all text from a Tiptap/ProseMirror JSON doc into one string. */
+function tiptapDocText(node: any): string {
+  if (!node) return '';
+  if (typeof node.text === 'string') return node.text;
+  if (Array.isArray(node.content)) return node.content.map(tiptapDocText).join(' ');
+  return '';
+}
 
 function emptyDraft(kind: Kind): Partial<Page & Post> {
   return {
@@ -108,6 +127,8 @@ export function ContentEditor({ kind }: { kind: Kind }) {
   const [revisionsOpen, setRevisionsOpen] = React.useState(false);
   const [linkOpen, setLinkOpen] = React.useState(false);
   const [livePreviewOpen, setLivePreviewOpen] = React.useState(false);
+  /** Homepage inline editor: the content path whose image is being picked. */
+  const [pickPath, setPickPath] = React.useState<string | null>(null);
   const [seoOpen, setSeoOpen] = React.useState(true);
   // Separate state for the mobile/tablet slide-over (lg-). Desktop uses the
   // inline `seoOpen` aside.
@@ -142,19 +163,72 @@ export function ContentEditor({ kind }: { kind: Kind }) {
     setSaveStatus('unsaved');
   };
 
-  // word count
-  const text = React.useMemo(() => {
-    if (!editor) return '';
-    return editor.getText({ blockSeparator: ' ' });
-  }, [editor, draft.content]);
-  const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // Word count is derived from the content JSON (not the live editor), so it's
+  // correct the instant the doc hydrates — before the Tiptap editor has mounted
+  // the content, `editor.getText()` returns '' and the count flashes 0. The
+  // editor keeps `draft.content` in sync via onChange, so this stays live too.
+  const wordCount = React.useMemo(() => {
+    const t = tiptapDocText(draft.content).trim();
+    return t ? t.split(/\s+/).length : 0;
+  }, [draft.content]);
 
-  // Reserved (code-driven) pages — editor body is read-only / hidden
+  // Reserved (code-driven) pages — editor body is read-only / hidden.
   const isReservedPage =
     kind === 'page' && !!draft.slug && RESERVED_PAGE_SLUGS.has(draft.slug);
   // The home / landing page — supports an in-CMS live preview of the website.
   const isHomePage = kind === 'page' && draft.slug === '/';
-  const livePreviewUrl = `${SITE_ORIGIN}/`;
+  // Pages whose text content is CMS-editable via `sections`.
+  const isAboutPage = kind === 'page' && draft.slug === '/about';
+  const isSupportPage = kind === 'page' && draft.slug === '/support';
+  const isProhibitedPage = kind === 'page' && draft.slug === '/prohibited-activities';
+  const isPrivacyPage = kind === 'page' && draft.slug === '/privacy-policy';
+  const isEsignPage = kind === 'page' && draft.slug === '/e-sign-consent';
+  const isCardTermsPage = kind === 'page' && draft.slug === '/card-terms';
+  // Pages whose text content is editable from the CMS (Content tab + streamed
+  // live preview).
+  const hasEditableSections =
+    isHomePage || isAboutPage || isSupportPage ||
+    isProhibitedPage || isPrivacyPage || isEsignPage || isCardTermsPage;
+  // Pages edited inline in the live preview (no right-side Content form). All
+  // CMS-sections pages now use inline editing — home, about, support, and the
+  // legal terms (which edit their markdown source inline).
+  const isInlineEditPage = hasEditableSections;
+  // Schema + resolver for the Content tab (homepage uses the editor's defaults).
+  const sectionsConfig = isAboutPage
+    ? { schema: ABOUT_CONTENT_SCHEMA, resolve: resolveAboutContent }
+    : isSupportPage
+      ? { schema: SUPPORT_CONTENT_SCHEMA, resolve: resolveSupportContent }
+      : isProhibitedPage
+        ? { schema: LEGAL_CONTENT_SCHEMA, resolve: resolveProhibitedContent }
+        : isPrivacyPage
+          ? { schema: LEGAL_CONTENT_SCHEMA, resolve: resolvePrivacyContent }
+          : isEsignPage
+            ? { schema: LEGAL_CONTENT_SCHEMA, resolve: resolveEsignContent }
+            : isCardTermsPage
+              ? { schema: LEGAL_CONTENT_SCHEMA, resolve: resolveCardTermsContent }
+              : undefined;
+  // Every reserved (code-driven) page gets an in-CMS live preview of its own
+  // public URL. The homepage additionally streams its unsaved `sections`.
+  const canLivePreview = isReservedPage;
+  const pageSlugPath = draft.slug
+    ? draft.slug.startsWith('/') ? draft.slug : `/${draft.slug}`
+    : '/';
+  const livePreviewUrl = `${SITE_ORIGIN}${pageSlugPath}`;
+
+  // Apply an edit made directly in the live preview. The full resolved content
+  // is the source of truth (so a path like `hero.titleParts.1.text` always
+  // exists); we set the path and store the complete object back into `sections`,
+  // then the panel streams it to the iframe and Save persists it. Uses the
+  // page's own resolver (home/about/support) so defaults merge correctly.
+  const inlineResolve = sectionsConfig?.resolve ?? resolveHomeContent;
+  const applyInlineEdit = (path: string, value: unknown) => {
+    setDraft((d) => ({
+      ...d,
+      sections: setAtPath(inlineResolve(d.sections), path, value),
+    }));
+    setDirty(true);
+    setSaveStatus('unsaved');
+  };
 
   // ─── Mutations ───────────────────────────────────────────────
   const persist = async (overrides: Partial<Page & Post> = {}) => {
@@ -308,7 +382,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
 
             {!isNew && draft.slug && (
               <Button variant="secondary" size="sm" asChild>
-                <a href={`http://localhost:3000${kind === 'page' ? (draft.slug.startsWith('/') ? draft.slug : '/' + draft.slug) : '/blog/' + draft.slug}`} target="_blank" rel="noopener noreferrer">
+                <a href={`${SITE_ORIGIN}${kind === 'page' ? (draft.slug.startsWith('/') ? draft.slug : '/' + draft.slug) : '/blog/' + draft.slug}`} target="_blank" rel="noopener noreferrer">
                   <Eye />
                   <span className="hidden sm:inline">Preview</span>
                 </a>
@@ -469,40 +543,49 @@ export function ContentEditor({ kind }: { kind: Kind }) {
               )}
 
               {isReservedPage ? (
-                isHomePage ? (
-                  livePreviewOpen ? (
-                    <LivePreviewPanel
-                      url={livePreviewUrl}
-                      sections={draft.sections}
-                      onClose={() => setLivePreviewOpen(false)}
-                    />
-                  ) : (
-                    <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
-                      <p className="text-sm text-fg-3">
-                        Edit the landing page content in the <span className="text-fg-1 font-medium">Content</span> tab on the right.
-                      </p>
-                      <p className="text-[11px] text-fg-4 mt-1">
-                        Layout and animations stay in code. Save (and publish) to push changes live.
-                      </p>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="mt-5"
-                        onClick={() => setLivePreviewOpen(true)}
-                      >
-                        <Monitor />
-                        Live Preview
-                      </Button>
-                    </div>
-                  )
+                !canLivePreview ? (
+                  <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
+                    <p className="text-sm text-fg-3">
+                      This page&apos;s content is managed in code (legal terms) and can&apos;t be edited here.
+                    </p>
+                    <p className="text-[11px] text-fg-4 mt-1">
+                      Use the <span className="text-fg-1 font-medium">SEO</span> panel on the right to edit its title, description, and social preview.
+                    </p>
+                  </div>
+                ) : (isInlineEditPage || livePreviewOpen) ? (
+                  <LivePreviewPanel
+                    url={livePreviewUrl}
+                    // Pages with editable sections stream their unsaved draft into
+                    // the iframe; other reserved pages just preview the live page.
+                    sections={hasEditableSections ? draft.sections : undefined}
+                    // Home/About/Support are edited inline in the preview (no right panel).
+                    editable={isInlineEditPage}
+                    onInlineEdit={isInlineEditPage ? applyInlineEdit : undefined}
+                    onPickImage={isInlineEditPage ? setPickPath : undefined}
+                  />
                 ) : (
                   <div className="rounded-spay-md border border-dashed border-line bg-surface/30 p-8 text-center">
                     <p className="text-sm text-fg-3">
-                      Body editor disabled for this page.
+                      {hasEditableSections ? (
+                        <>Edit this page&apos;s content in the <span className="text-fg-1 font-medium">Content</span> tab on the right.</>
+                      ) : (
+                        <>This page&apos;s layout is built in code. Use the <span className="text-fg-1 font-medium">SEO</span> panel on the right for its title, description, and social preview.</>
+                      )}
                     </p>
                     <p className="text-[11px] text-fg-4 mt-1">
-                      Use the SEO panel on the right to update title, description, and social previews.
+                      {hasEditableSections
+                        ? 'Layout and animations stay in code. Save (and publish) to push changes live.'
+                        : 'Open the live preview to see the rendered page.'}
                     </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-5"
+                      onClick={() => setLivePreviewOpen(true)}
+                    >
+                      <Monitor />
+                      Live Preview
+                    </Button>
                   </div>
                 )
               ) : (
@@ -565,10 +648,10 @@ export function ContentEditor({ kind }: { kind: Kind }) {
               />
             );
 
-            // On the homepage, the right panel hosts BOTH the content editor
-            // and the SEO panel via a Content / SEO tab switcher. Everywhere
-            // else it's just the SEO panel.
-            const rightPanel = isHomePage ? (
+            // Legal pages host BOTH the content editor and the SEO panel via a
+            // Content / SEO tab switcher. Home/About/Support are edited inline in
+            // the preview, so they show SEO only. Every other page shows SEO only.
+            const rightPanel = (hasEditableSections && !isInlineEditPage) ? (
               <Tabs defaultValue="content" className="flex flex-col h-full">
                 <TabsList className="mx-4 mt-3 self-start">
                   <TabsTrigger value="content">Content</TabsTrigger>
@@ -578,6 +661,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
                   <HomeContentEditor
                     value={draft.sections}
                     onChange={(next) => update({ sections: next } as any)}
+                    {...(sectionsConfig ?? {})}
                   />
                 </TabsContent>
                 <TabsContent value="seo" className="mt-3 flex-1 min-h-0 overflow-hidden">
@@ -675,6 +759,19 @@ export function ContentEditor({ kind }: { kind: Kind }) {
           onConfirmDelete={handleDelete}
         />
 
+
+        {/* Inline editor: media picker for image fields clicked in the preview */}
+        {isInlineEditPage && (
+          <MediaPickerModal
+            open={!!pickPath}
+            onOpenChange={(o) => !o && setPickPath(null)}
+            accept="image"
+            onPick={(media) => {
+              if (pickPath) applyInlineEdit(pickPath, media.url);
+              setPickPath(null);
+            }}
+          />
+        )}
 
         {/* Schedule for later */}
         <ScheduleDialog

@@ -19,21 +19,27 @@ import {
 type RequestPick = (apply: (url: string) => void) => void;
 
 /**
- * Schema-driven editor for the homepage's CMS-managed content.
+ * Schema-driven editor for a page's CMS-managed `sections` content.
  *
- * The landing page layout/animation stays in code on the website; this form
- * edits only the text/images. It is fully controlled: it always emits the
- * COMPLETE merged content object so `sections` is self-contained when saved.
+ * The page layout/animation stays in code on the website; this form edits only
+ * the text/images. It is fully controlled: it always emits the COMPLETE merged
+ * content object so `sections` is self-contained when saved. Defaults to the
+ * homepage schema, but any reserved page (e.g. About) can pass its own
+ * `schema` + `resolve`.
  */
 export function HomeContentEditor({
   value,
   onChange,
+  schema = HOME_CONTENT_SCHEMA,
+  resolve = resolveHomeContent,
 }: {
   value: Record<string, any> | undefined;
   onChange: (next: Record<string, any>) => void;
+  schema?: SectionDef[];
+  resolve?: (raw: any) => Record<string, any>;
 }) {
   // Merge saved overrides onto defaults so every field shows its real value.
-  const content = React.useMemo(() => resolveHomeContent(value), [value]);
+  const content = React.useMemo(() => resolve(value), [value, resolve]);
 
   // Single shared media picker; an image field registers a callback to apply
   // the picked URL to itself.
@@ -49,8 +55,8 @@ export function HomeContentEditor({
 
   return (
     <div className="rounded-spay-md border border-line bg-surface/30">
-      <Accordion type="multiple" defaultValue={['hero']} className="px-4">
-        {HOME_CONTENT_SCHEMA.map((section: SectionDef) => (
+      <Accordion type="multiple" defaultValue={[schema[0]?.key]} className="px-4">
+        {schema.map((section: SectionDef) => (
           <AccordionItem key={section.key} value={section.key}>
             <AccordionTrigger>{section.label}</AccordionTrigger>
             <AccordionContent className="space-y-4">
@@ -92,6 +98,13 @@ function FieldControl({
   onChange: (v: any) => void;
   onRequestPick: RequestPick;
 }) {
+  // Optional text/textarea fields collapse to a "+ Add" button when empty, so
+  // sections that don't use them (e.g. a bullets-only legal section) don't show
+  // an empty box. The field reappears as soon as it has a value.
+  if ((field.type === 'text' || field.type === 'textarea') && field.optional) {
+    return <OptionalText field={field} value={value} onChange={onChange} />;
+  }
+
   switch (field.type) {
     case 'text':
       return (
@@ -195,6 +208,47 @@ function setAt(items: any[], i: number, v: any, onChange: (next: any[]) => void)
   const next = items.slice();
   next[i] = v;
   onChange(next);
+}
+
+/** Optional text/textarea: shows a "+ Add …" button until it has a value. */
+function OptionalText({
+  field,
+  value,
+  onChange,
+}: {
+  field: Extract<Field, { type: 'text' | 'textarea' | 'image' }>;
+  value: any;
+  onChange: (v: any) => void;
+}) {
+  const hasValue = typeof value === 'string' && value.trim() !== '';
+  const [expanded, setExpanded] = React.useState(hasValue);
+  // Stay open once it has had a value, so clearing the text mid-edit doesn't
+  // collapse the field and steal focus.
+  React.useEffect(() => {
+    if (hasValue) setExpanded(true);
+  }, [hasValue]);
+
+  if (!hasValue && !expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="inline-flex items-center gap-1 rounded-spay-sm border border-dashed border-line px-2.5 py-1.5 text-xs text-fg-3 transition-colors hover:border-cyan-300/40 hover:text-cyan-300"
+      >
+        + Add {field.label.toLowerCase()}
+      </button>
+    );
+  }
+
+  return (
+    <Labeled label={field.label}>
+      {field.type === 'textarea' ? (
+        <Textarea value={value ?? ''} onChange={(e) => onChange(e.target.value)} rows={3} />
+      ) : (
+        <Input value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
+      )}
+    </Labeled>
+  );
 }
 
 function Labeled({ label, children }: { label: string; children: React.ReactNode }) {

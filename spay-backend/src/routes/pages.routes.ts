@@ -97,6 +97,7 @@ pageRoutes.post(
       publishedAt: body.status === 'published' ? new Date() : undefined,
     });
 
+    await page.populate('featuredImage', 'name url alt variants width height');
     triggerContentRevalidate(['/', slug], 'page');
     res.status(201).json(page);
   })
@@ -163,6 +164,10 @@ pageRoutes.put(
     if (beforeSlug !== existing.slug) paths.add(beforeSlug);
     if (wasPublished || existing.status === 'published') triggerContentRevalidate(Array.from(paths), 'page');
 
+    // Populate the media ref so the PUT response matches GET /:id. Without this
+    // the editor's cached copy holds a bare ObjectId and the featured-image
+    // preview renders empty after save until a full refetch.
+    await existing.populate('featuredImage', 'name url alt variants width height');
     res.json(existing.toObject());
   })
 );

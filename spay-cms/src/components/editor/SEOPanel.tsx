@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance } from '@/lib/queries';
 import { MediaPickerModal } from '@/components/MediaPickerModal';
-import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Ban, ImageOff, DatabaseZap, Activity } from 'lucide-react';
+import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Activity } from 'lucide-react';
 
 const SITE_ORIGIN = 'https://spay.finance';
 
@@ -382,12 +382,6 @@ export function SEOPanel({
                 <div className="rounded-spay-md border border-cyan-300/25 bg-cyan-300/[0.04] p-3 text-xs text-fg-3 leading-relaxed">
                   Article JSON-LD is built automatically from this page's title, description, featured image,
                   publish date, and the global Organization (publisher). No extra fields needed.
-                  {kind === 'post' && (
-                    <span className="block mt-1.5 text-fg-4">
-                      Posts already emit <span className="font-mono text-cyan-300">BlogPosting</span> by default — this
-                      additional Article entry is usually redundant.
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -419,7 +413,7 @@ export function SEOPanel({
             <AccordionTrigger>
               <span className="flex items-center gap-2">
                 Performance
-                {(perf.skipAnalytics || perf.skipCustomScripts || perf.disableCache || !perf.lazyLoadImages) && (
+                {(perf.skipAnalytics || perf.skipCustomScripts) && (
                   <Badge variant="warning" size="sm">Custom</Badge>
                 )}
               </span>
@@ -433,19 +427,6 @@ export function SEOPanel({
                 title="Disable heavy scripts"
                 checked={perf.skipAnalytics || perf.skipCustomScripts}
                 onChange={(v) => patchPerf({ skipAnalytics: v, skipCustomScripts: v })}
-              />
-              <PerfToggle
-                icon={DatabaseZap}
-                title="Disable caching"
-                checked={perf.disableCache}
-                onChange={(v) => patchPerf({ disableCache: v })}
-                danger={perf.disableCache}
-              />
-              <PerfToggle
-                icon={ImageOff}
-                title="Lazy-load body images"
-                checked={perf.lazyLoadImages}
-                onChange={(v) => patchPerf({ lazyLoadImages: v })}
               />
             </AccordionContent>
           </AccordionItem>
@@ -523,7 +504,6 @@ function SocialImageField({
  * ──────────────────────────────────────────────────────────────── */
 
 const SCHEMA_OPTIONS: { value: StructuredData['type']; label: string; description: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { value: 'none',    label: 'None',         description: 'Only global Organization + Breadcrumb schemas emit.',         icon: Ban },
   { value: 'article', label: 'Article',      description: 'Auto-built from page fields. Best for blog-style content.',   icon: Newspaper },
   { value: 'faq',     label: 'FAQ',          description: 'Q&A list — eligible for "People also ask" rich results.',     icon: HelpCircle },
   { value: 'service', label: 'Service',      description: 'For services pages (consulting, cards, transfers…).',         icon: Briefcase },
