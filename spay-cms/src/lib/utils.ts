@@ -28,6 +28,14 @@ export function relativeTime(date: Date | string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+/** Absolute date like "Jun 10, 2026" — matches the public site's post cards. */
+export function formatDate(date: Date | string | null | undefined): string {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

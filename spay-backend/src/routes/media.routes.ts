@@ -34,6 +34,47 @@ function resourceTypeFor(kind: Kind): 'image' | 'video' | 'raw' {
   return 'raw';
 }
 
+/** Deep-scan a JSON value for an exact string (e.g. a media URL). */
+function jsonHasString(node: unknown, target: string): boolean {
+  if (typeof node === 'string') return node === target;
+  if (Array.isArray(node)) return node.some((v) => jsonHasString(v, target));
+  if (node && typeof node === 'object') {
+    return Object.values(node as Record<string, unknown>).some((v) => jsonHasString(v, target));
+  }
+  return false;
+}
+
+/** Deep-replace every exact string match in a JSON value. */
+function jsonReplaceString(
+  node: unknown,
+  target: string,
+  replacement: string,
+): { changed: boolean; value: unknown } {
+  if (typeof node === 'string') {
+    return node === target ? { changed: true, value: replacement } : { changed: false, value: node };
+  }
+  if (Array.isArray(node)) {
+    let changed = false;
+    const value = node.map((v) => {
+      const r = jsonReplaceString(v, target, replacement);
+      changed = changed || r.changed;
+      return r.value;
+    });
+    return { changed, value };
+  }
+  if (node && typeof node === 'object') {
+    let changed = false;
+    const value: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const r = jsonReplaceString(v, target, replacement);
+      changed = changed || r.changed;
+      value[k] = r.value;
+    }
+    return { changed, value };
+  }
+  return { changed: false, value: node };
+}
+
 /** Stream an in-memory file buffer to Cloudinary. */
 function uploadBuffer(buffer: Buffer, kind: Kind): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
@@ -158,17 +199,21 @@ mediaRoutes.get(
 
     const id = media._id;
     const url = media.url;
-    type Ref = { type: 'page' | 'post'; id: string; title: string; slug: string; via: 'featured' | 'cover' };
+    type Ref = { type: 'page' | 'post'; id: string; title: string; slug: string; via: 'featured' | 'cover' | 'homepage' };
     const refs: Ref[] = [];
 
     const [pages, posts] = await Promise.all([
-      Page.find({}).select('title slug featuredImage').lean(),
+      Page.find({}).select('title slug featuredImage sections').lean(),
       Post.find({}).select('title slug coverMedia cover').lean(),
     ]);
 
     for (const p of pages) {
       if ((p as any).featuredImage && String((p as any).featuredImage) === String(id)) {
         refs.push({ type: 'page', id: String(p._id), title: p.title, slug: p.slug, via: 'featured' });
+      } else if (url && (p as any).sections && jsonHasString((p as any).sections, url)) {
+        // Media URL embedded in the page's structured sections — e.g. the
+        // homepage hero image or feature-card images.
+        refs.push({ type: 'page', id: String(p._id), title: p.title, slug: p.slug, via: 'homepage' });
       }
     }
     for (const p of posts) {
@@ -183,12 +228,60 @@ mediaRoutes.get(
   })
 );
 
-/** DELETE /api/media/:id — removes the doc and the Cloudinary asset. */
+/**
+ * DELETE /api/media/:id
+ *
+ * Removes the doc + the Cloudinary asset AND cascades: every reference to this
+ * media is cleared so deleting from the library never leaves a broken image —
+ * post covers, page featured images, OG/Twitter images, and any URL embedded in
+ * a page's structured `sections` (homepage hero, feature-card images, …).
+ * Cleared landing-page images then fall back to their bundled defaults (see the
+ * website's FallbackImg). Returns a `cleared` summary of what was touched.
+ */
 mediaRoutes.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const media = await Media.findByIdAndDelete(req.params.id);
+    const media = await Media.findById(req.params.id);
     if (!media) throw ApiError.notFound('Media not found');
+
+    const id = media._id;
+    const url = media.url;
+    const cleared = { covers: 0, featured: 0, seo: 0, sections: 0 };
+
+    // 1. Object-id references.
+    const [pf, pc] = await Promise.all([
+      Page.updateMany({ featuredImage: id }, { $unset: { featuredImage: '' } }),
+      Post.updateMany({ coverMedia: id }, { $unset: { coverMedia: '' } }),
+    ]);
+    cleared.featured += pf.modifiedCount ?? 0;
+    cleared.covers += pc.modifiedCount ?? 0;
+
+    // 2. URL references — denormalized post cover + OG/Twitter images.
+    if (url) {
+      const [coverRes, ...seoRes] = await Promise.all([
+        Post.updateMany({ cover: url }, { $set: { cover: '' } }),
+        Page.updateMany({ 'seo.og.image': url }, { $set: { 'seo.og.image': '' } }),
+        Page.updateMany({ 'seo.twitter.image': url }, { $set: { 'seo.twitter.image': '' } }),
+        Post.updateMany({ 'seo.og.image': url }, { $set: { 'seo.og.image': '' } }),
+        Post.updateMany({ 'seo.twitter.image': url }, { $set: { 'seo.twitter.image': '' } }),
+      ]);
+      cleared.covers += coverRes.modifiedCount ?? 0;
+      cleared.seo += seoRes.reduce((n, r) => n + (r.modifiedCount ?? 0), 0);
+
+      // 3. URL embedded in a page's structured `sections` (homepage hero,
+      //    feature-card images, …) — deep-replace with '' so the landing page
+      //    falls back to its bundled default.
+      const sectionPages = await Page.find({ sections: { $ne: null } }).select('sections').lean();
+      for (const p of sectionPages) {
+        const rep = jsonReplaceString((p as any).sections, url, '');
+        if (rep.changed) {
+          await Page.updateOne({ _id: p._id }, { $set: { sections: rep.value } });
+          cleared.sections += 1;
+        }
+      }
+    }
+
+    await media.deleteOne();
 
     // Best-effort remove from Cloudinary (filename holds the public_id).
     try {
@@ -199,6 +292,6 @@ mediaRoutes.delete(
       logger.warn('[media] cloudinary destroy failed', err);
     }
 
-    res.json({ ok: true });
+    res.json({ ok: true, cleared });
   })
 );

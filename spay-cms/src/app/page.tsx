@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
   FileText, Image as ImageIcon, AlertOctagon, Activity,
-  ArrowRight, NotebookPen, Clock,
+  ArrowRight, NotebookPen,
 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -14,7 +14,7 @@ import { Progress } from '@/components/ui/Progress';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useStats } from '@/lib/queries';
 import { useAuth } from '@/lib/auth-context';
-import { formatNumber, relativeTime } from '@/lib/utils';
+import { formatNumber, relativeTime, formatDate } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -202,9 +202,10 @@ export default function DashboardPage() {
                       <h3 className="font-display font-semibold text-sm text-fg-1 leading-snug mb-2 line-clamp-2 group-hover:text-cyan-300 transition-colors">
                         {p.title}
                       </h3>
-                      <div className="flex items-center justify-between text-[11px] text-fg-4">
-                        <span>{p.authorName}</span>
-                        <span className="inline-flex items-center gap-1"><Clock className="size-3" />{p.readTime || 5} min</span>
+                      <div className="flex items-center gap-1.5 text-[11px] text-fg-4">
+                        <span>{formatDate(p.publishedAt || p.updatedAt)}</span>
+                        <span aria-hidden>·</span>
+                        <span>{p.readTime || 5} min read</span>
                       </div>
                     </div>
                   </Link>

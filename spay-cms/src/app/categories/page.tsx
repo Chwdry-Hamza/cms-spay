@@ -25,7 +25,7 @@ import {
   type Category, type CategorySEO,
 } from '@/lib/queries';
 import { apiErrorMessage } from '@/lib/api';
-import { cn, slugify } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 const SITE_ORIGIN = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
@@ -212,7 +212,6 @@ function CategoryModal({
   const [color, setColor] = React.useState(SWATCHES[0]);
   const [slug, setSlug] = React.useState('');
   const [content, setContent] = React.useState('');
-  const [pageSize, setPageSize] = React.useState(0);
   const [seoTitle, setSeoTitle] = React.useState('');
   const [seoDesc, setSeoDesc] = React.useState('');
 
@@ -223,13 +222,10 @@ function CategoryModal({
       setColor(editing?.color ?? SWATCHES[0]);
       setSlug(editing?.slug ?? '');
       setContent(editing?.content ?? '');
-      setPageSize(editing?.pageSize ?? 0);
       setSeoTitle(editing?.seo?.title ?? '');
       setSeoDesc(editing?.seo?.description ?? '');
     }
   }, [state.open, editing]);
-
-  const computedSlug = slug || slugify(name || '');
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => !o && onClose()}>
@@ -248,7 +244,6 @@ function CategoryModal({
             <div>
               <Label htmlFor="cat-name">Name</Label>
               <Input id="cat-name" className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Compliance" autoFocus />
-              {name && <p className="text-[11px] text-fg-4 font-mono mt-1.5">slug: /blog/category/{computedSlug}</p>}
             </div>
             <div>
               <Label>Short description</Label>
@@ -258,28 +253,16 @@ function CategoryModal({
               <Label>Long-form intro <span className="text-fg-4 font-normal">(shown above the post grid on the category page)</span></Label>
               <Textarea className="mt-1.5" rows={5} value={content} onChange={(e) => setContent(e.target.value)} placeholder={`Helpful for SEO. Split paragraphs with a blank line.\n\nExample: "Crypto coverage from the Spay team — stablecoin launches, regulatory news, and our take on on-chain payments."`} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Color</Label>
-                <div className="mt-1.5 flex items-center gap-2">
-                  {SWATCHES.map((s) => (
-                    <button
-                      key={s} type="button" onClick={() => setColor(s)}
-                      className={cn('size-7 rounded-spay-md border-2 transition-all', color === s ? 'border-fg-1 scale-110' : 'border-transparent')}
-                      style={{ background: s }}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="cat-page-size">Posts per page</Label>
-                <Input
-                  id="cat-page-size" type="number" min={0} max={100} className="mt-1.5"
-                  value={pageSize || ''}
-                  onChange={(e) => setPageSize(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                  placeholder="12 (site default)"
-                />
-                <p className="text-[11px] text-fg-4 mt-1.5">0 = use site default</p>
+            <div>
+              <Label>Color</Label>
+              <div className="mt-1.5 flex items-center gap-2">
+                {SWATCHES.map((s) => (
+                  <button
+                    key={s} type="button" onClick={() => setColor(s)}
+                    className={cn('size-7 rounded-spay-md border-2 transition-all', color === s ? 'border-fg-1 scale-110' : 'border-transparent')}
+                    style={{ background: s }}
+                  />
+                ))}
               </div>
             </div>
           </TabsContent>
@@ -305,7 +288,7 @@ function CategoryModal({
               color,
               slug: editing ? slug : undefined,
               content,
-              pageSize,
+              pageSize: 0,
               seo: {
                 title:       seoTitle.trim() || undefined,
                 description: seoDesc.trim() || undefined,

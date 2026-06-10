@@ -138,7 +138,6 @@ export default function PagesPage() {
                 <tr className="border-b border-line">
                   <th className="text-left pl-4 px-2 py-2.5"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-4">Title</span></th>
                   <th className="text-left px-2 py-2.5 hidden md:table-cell"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-4">Status</span></th>
-                  <th className="text-left px-2 py-2.5 hidden lg:table-cell"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-4">Author</span></th>
                   <th className="text-left px-2 py-2.5 hidden sm:table-cell"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-4">Updated</span></th>
                   <th className="text-right px-4 py-2.5 w-12" />
                 </tr>
@@ -153,7 +152,6 @@ export default function PagesPage() {
                         </Link>
                       </td>
                       <td className="px-2 py-3 hidden md:table-cell"><StatusBadge status={p.status} /></td>
-                      <td className="px-2 py-3 hidden lg:table-cell text-fg-2 text-sm whitespace-nowrap">{p.authorName || '—'}</td>
                       <td className="px-2 py-3 hidden sm:table-cell text-fg-3 text-xs whitespace-nowrap">{relativeTime(p.updatedAt)}</td>
                       <td className="px-4 py-3 text-right">
                         <DropdownMenu>

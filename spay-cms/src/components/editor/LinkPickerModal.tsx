@@ -45,6 +45,9 @@ export function LinkPickerModal({
   initialNewTab?: boolean;
 }) {
   const isEdit = !!initialHref;
+  // The "Suggested" tab surfaces internal-linking matches based on category /
+  // tags — which only posts have. Hide it when editing a page (keep it for posts).
+  const showSuggested = context.excludeType !== 'page';
 
   const [query, setQuery] = React.useState('');
   const [newTab, setNewTab] = React.useState(false);
@@ -77,7 +80,7 @@ export function LinkPickerModal({
   const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions({
     ...context,
     limit: 8,
-    enabled: open && tab === 'suggested',
+    enabled: open && showSuggested && tab === 'suggested',
   });
 
   // Default the initial tab + pre-fill on open
@@ -102,7 +105,7 @@ export function LinkPickerModal({
         setUrl('');
         setSelected(null);
         setNewTab(false);
-        setTab(hasContext ? 'suggested' : 'internal');
+        setTab(showSuggested && hasContext ? 'suggested' : 'internal');
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,7 +134,9 @@ export function LinkPickerModal({
         <div className="px-6 pt-4">
           <Tabs value={tab} onValueChange={(v) => { setTab(v as any); setSelected(null); }}>
             <TabsList>
-              <TabsTrigger value="suggested"><Sparkles className="size-3.5" /> Suggested</TabsTrigger>
+              {showSuggested && (
+                <TabsTrigger value="suggested"><Sparkles className="size-3.5" /> Suggested</TabsTrigger>
+              )}
               <TabsTrigger value="internal"><Link2 className="size-3.5" /> Internal</TabsTrigger>
               <TabsTrigger value="external"><ExternalLink className="size-3.5" /> External</TabsTrigger>
             </TabsList>

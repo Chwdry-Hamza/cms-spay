@@ -426,8 +426,17 @@ export function useDeleteMedia() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/api/media/${id}`).then((r) => r.data),
+    // Deleting media cascades on the backend (clears the image from post covers,
+    // page featured images, OG images, and homepage sections), so refresh
+    // everything that could have rendered it — the lists AND open editor views —
+    // so the cleared image disappears instantly with no manual reload.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['media'] });
+      qc.invalidateQueries({ queryKey: ['media-usage'] });
+      qc.invalidateQueries({ queryKey: ['posts'] });
+      qc.invalidateQueries({ queryKey: ['post'] });
+      qc.invalidateQueries({ queryKey: ['pages'] });
+      qc.invalidateQueries({ queryKey: ['page'] });
       qc.invalidateQueries({ queryKey: ['stats'] });
     },
   });

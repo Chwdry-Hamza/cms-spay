@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import {
   Search, Filter, MoreHorizontal, Plus, Trash2,
-  NotebookPen, X, LayoutGrid, List as ListIcon, Clock,
+  NotebookPen, X, LayoutGrid, List as ListIcon,
 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -22,7 +22,7 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState';
 import { usePosts, useDeletePost, type ContentStatus } from '@/lib/queries';
 import { apiErrorMessage } from '@/lib/api';
-import { relativeTime, cn } from '@/lib/utils';
+import { relativeTime, formatDate, cn } from '@/lib/utils';
 import { DeleteWithLinksDialog } from '@/components/DeleteWithLinksDialog';
 
 export default function PostsPage() {
@@ -129,9 +129,10 @@ export default function PostsPage() {
                     {p.categoryName && <p className="text-[10px] text-cyan-300 font-semibold uppercase tracking-[0.18em] mb-2">{p.categoryName}</p>}
                     <h3 className="font-display font-semibold text-fg-1 text-base leading-snug line-clamp-2 group-hover:text-cyan-300 transition-colors">{p.title}</h3>
                     {p.excerpt && <p className="text-xs text-fg-3 leading-snug line-clamp-2 mt-1.5">{p.excerpt}</p>}
-                    <div className="flex items-center justify-between text-[11px] text-fg-4 mt-auto pt-3 border-t border-line">
-                      <span>{p.authorName || '—'}</span>
-                      <span className="inline-flex items-center gap-1"><Clock className="size-3" />{p.readTime || 5} min</span>
+                    <div className="flex items-center gap-1.5 text-[11px] text-fg-4 mt-auto pt-3 border-t border-line">
+                      <span>{formatDate(p.publishedAt || p.updatedAt)}</span>
+                      <span aria-hidden>·</span>
+                      <span>{p.readTime || 5} min read</span>
                     </div>
                   </div>
                 </Link>
