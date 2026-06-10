@@ -415,20 +415,18 @@ export function SEOPanel({
             <AccordionTrigger>
               <span className="flex items-center gap-2">
                 Performance
-                {(perf.skipAnalytics || perf.skipCustomScripts) && (
+                {perf.skipAnalytics && (
                   <Badge variant="warning" size="sm">Custom</Badge>
                 )}
               </span>
             </AccordionTrigger>
             <AccordionContent className="space-y-2.5">
-              {/* One toggle covers BOTH analytics + custom script injection.
-                  We write to both backend fields so the website-next reader
-                  doesn't need any change. Either flag being true counts as on. */}
+              {/* Skip GA4 / GTM on this page (e.g. legal / confirmation pages). */}
               <PerfToggle
                 icon={Activity}
-                title="Disable heavy scripts"
-                checked={perf.skipAnalytics || perf.skipCustomScripts}
-                onChange={(v) => patchPerf({ skipAnalytics: v, skipCustomScripts: v })}
+                title="Disable analytics"
+                checked={perf.skipAnalytics}
+                onChange={(v) => patchPerf({ skipAnalytics: v })}
               />
             </AccordionContent>
           </AccordionItem>

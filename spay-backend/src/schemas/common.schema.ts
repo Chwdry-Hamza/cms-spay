@@ -52,17 +52,14 @@ export const structuredDataSchema = z.object({
  * Per-page performance hooks. All booleans default to "do the normal thing"
  * so most pages can leave these untouched.
  *
- *   skipAnalytics      — don't fire GA4 / GTM / Meta Pixel on this page
+ *   skipAnalytics      — don't fire GA4 / GTM on this page
  *                        (use for legal pages, login confirmation, etc.)
- *   skipCustomScripts  — don't inject the header/body/footer custom scripts
- *                        from SEO Settings → Analytics
  *   disableCache       — force this page to render dynamically every request
  *                        (use sparingly; defeats ISR)
  *   lazyLoadImages     — add loading="lazy" to body images. Default true.
  */
 export const performanceSchema = z.object({
   skipAnalytics:     z.boolean().default(false),
-  skipCustomScripts: z.boolean().default(false),
   disableCache:      z.boolean().default(false),
   lazyLoadImages:    z.boolean().default(true),
 }).default({});

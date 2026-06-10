@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { BarChart3, Code2, CheckCircle2, Save, ShieldCheck, Loader2 } from 'lucide-react';
+import { BarChart3, CheckCircle2, Save, ShieldCheck, Loader2 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -17,29 +17,22 @@ import { apiErrorMessage } from '@/lib/api';
 /**
  * Analytics & Tracking — single home for:
  *   1. Trackers          → GA4 + GTM container IDs
- *   2. Custom scripts    → site-wide Header / Body open / Footer raw JS
- *   3. Verification      → Search Console ownership tag
+ *   2. Verification      → Search Console ownership tag
  *
  * Backend storage is split across two settings keys (we save to both on
- * Save all): tracker IDs + script bodies live under `analytics`; the
- * Search Console verification value lives under `seo` alongside the
- * other site-wide SEO fields.
+ * Save all): tracker IDs live under `analytics`; the Search Console
+ * verification value lives under `seo` alongside the other site-wide SEO
+ * fields.
  */
 
 type Analytics = {
   ga4Id: string;
   gtmId: string;
-  headerScript: string;
-  bodyScript: string;
-  footerScript: string;
 };
 
 const DEFAULT_ANALYTICS: Analytics = {
   ga4Id: '',
   gtmId: '',
-  headerScript: '',
-  bodyScript: '',
-  footerScript: '',
 };
 
 /** Subset of the `seo` setting that this page can edit. */
@@ -139,7 +132,6 @@ export default function AnalyticsPage() {
         <Tabs defaultValue="trackers">
           <TabsList>
             <TabsTrigger value="trackers"><BarChart3 className="size-3.5" />Trackers</TabsTrigger>
-            <TabsTrigger value="scripts"><Code2 className="size-3.5" />Custom scripts</TabsTrigger>
             <TabsTrigger value="verification"><ShieldCheck className="size-3.5" />Verification</TabsTrigger>
           </TabsList>
 
@@ -179,33 +171,6 @@ export default function AnalyticsPage() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="scripts" className="space-y-4">
-            {(['headerScript', 'bodyScript', 'footerScript'] as const).map((k) => {
-              const titles = { headerScript: 'Header', bodyScript: 'Body open', footerScript: 'Footer' } as const;
-              const value = draft[k];
-              return (
-                <Card key={k}>
-                  <CardHeader>
-                    <CardTitle>{titles[k]}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="rounded-spay-md border border-line bg-surface-deepest overflow-hidden">
-                      <div className="px-4 py-2 border-b border-line bg-surface/40">
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-4">HTML</span>
-                      </div>
-                      <textarea
-                        value={value}
-                        onChange={(e) => set(k, e.target.value)}
-                        spellCheck={false}
-                        className="w-full h-[160px] p-4 bg-transparent font-mono text-xs text-fg-1 outline-none resize-none leading-relaxed"
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
           </TabsContent>
 
           <TabsContent value="verification" className="space-y-4">

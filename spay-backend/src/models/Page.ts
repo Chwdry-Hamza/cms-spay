@@ -41,7 +41,6 @@ const StructuredDataSchema = new Schema(
 const PerformanceSchema = new Schema(
   {
     skipAnalytics:     { type: Boolean, default: false },
-    skipCustomScripts: { type: Boolean, default: false },
     disableCache:      { type: Boolean, default: false },
     lazyLoadImages:    { type: Boolean, default: true },
   },

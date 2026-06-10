@@ -129,6 +129,7 @@ publicRoutes.get(
         .skip((page - 1) * limit)
         .limit(limit)
         .populate('category', 'name slug color')
+        .populate('coverMedia', 'alt')
         .lean(),
       Post.countDocuments(filter),
     ]);
@@ -151,6 +152,7 @@ publicRoutes.get(
     const slug = decodeURIComponent(Array.isArray(raw) ? raw[0] : raw);
     const post = await Post.findOne({ slug, status: 'published' })
       .populate('category', 'name slug color')
+      .populate('coverMedia', 'alt')
       .lean();
     if (!post) throw ApiError.notFound('Post not found');
     res.set('Cache-Control', 'public, max-age=60, s-maxage=300');
@@ -207,6 +209,7 @@ publicRoutes.get(
         .skip((page - 1) * limit)
         .limit(limit)
         .populate('category', 'name slug color')
+        .populate('coverMedia', 'alt')
         .lean(),
       Post.countDocuments(filter),
     ]);
@@ -223,11 +226,14 @@ publicRoutes.get(
   })
 );
 
-// Sitemap data for categories: every category landing page.
+// Sitemap data for categories — only those with at least one published post.
+// Empty category landing pages are thin content, so we keep them out of the
+// sitemap (they're still reachable/indexable, just not advertised to crawlers).
 publicRoutes.get(
   '/sitemap/categories',
   asyncHandler(async (_req, res) => {
-    const all = await Category.find({}).select('slug updatedAt').lean();
+    const nonEmpty = await Post.distinct('category', { status: 'published' });
+    const all = await Category.find({ _id: { $in: nonEmpty } }).select('slug updatedAt').lean();
     const items = all.map((c) => ({
       slug: c.slug,
       updatedAt: (c.updatedAt as any)?.toISOString?.() ?? String(c.updatedAt ?? ''),
@@ -391,25 +397,37 @@ publicRoutes.get(
       return;
     }
 
-    // Mongo text search across both collections in parallel.
-    // Filter out seo.noindex pages so we don't surface anything the editor
-    // has explicitly hidden from search engines.
+    // Case-insensitive SUBSTRING search across both collections so partial
+    // queries match — e.g. "crypto" finds "cryptocurrency" (Mongo $text only
+    // matches whole, stemmed words). The query is escaped for regex safety; we
+    // match title/slug/excerpt (+ tags for posts), then rank in JS: title >
+    // slug/tags > excerpt. seo.noindex docs are filtered out so hidden content
+    // never surfaces.
     const baseFilter = { status: 'published', 'seo.noindex': { $ne: true } } as const;
+    const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(safe, 'i');
+    const ql = q.toLowerCase();
 
     type Hit =
       | { kind: 'page'; _id: string; title: string; slug: string; excerpt: string; score: number }
       | { kind: 'post'; _id: string; title: string; slug: string; excerpt: string; score: number; categoryName?: string };
 
+    const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(ql);
+    const scoreOf = (d: { title?: string; slug?: string; excerpt?: string; tags?: string[] }) =>
+      (has(d.title) ? 3 : 0) +
+      (has(d.slug) ? 2 : 0) +
+      ((d.tags ?? []).some((t) => String(t).toLowerCase().includes(ql)) ? 2 : 0) +
+      (has(d.excerpt) ? 1 : 0);
+
+    // Over-fetch a little before JS ranking/slicing so the best matches win.
     const [pages, posts] = await Promise.all([
-      Page.find({ ...baseFilter, $text: { $search: q } }, { score: { $meta: 'textScore' } })
+      Page.find({ ...baseFilter, $or: [{ title: rx }, { slug: rx }, { excerpt: rx }] })
         .select('title slug excerpt')
-        .sort({ score: { $meta: 'textScore' } })
-        .limit(limit)
+        .limit(limit * 2)
         .lean(),
-      Post.find({ ...baseFilter, $text: { $search: q } }, { score: { $meta: 'textScore' } })
-        .select('title slug excerpt categoryName')
-        .sort({ score: { $meta: 'textScore' } })
-        .limit(limit)
+      Post.find({ ...baseFilter, $or: [{ title: rx }, { slug: rx }, { excerpt: rx }, { tags: rx }] })
+        .select('title slug excerpt categoryName tags')
+        .limit(limit * 2)
         .lean(),
     ]);
 
@@ -420,7 +438,7 @@ publicRoutes.get(
         title: p.title,
         slug: p.slug,
         excerpt: p.excerpt ?? '',
-        score: p.score ?? 0,
+        score: scoreOf(p),
       })),
       ...posts.map((p: any) => ({
         kind: 'post' as const,
@@ -429,7 +447,7 @@ publicRoutes.get(
         slug: p.slug,
         excerpt: p.excerpt ?? '',
         categoryName: p.categoryName,
-        score: p.score ?? 0,
+        score: scoreOf(p),
       })),
     ]
       .sort((a, b) => b.score - a.score)

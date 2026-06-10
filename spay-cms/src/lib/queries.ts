@@ -91,12 +91,10 @@ export const emptyStructuredData: StructuredData = {
 
 export type Performance = {
   skipAnalytics: boolean;
-  skipCustomScripts: boolean;
 };
 
 export const emptyPerformance: Performance = {
   skipAnalytics: false,
-  skipCustomScripts: false,
 };
 
 export type Page = {
@@ -492,6 +490,11 @@ export function useLogs404(hideResolved = true) {
       '/api/logs-404', { params: { hideResolved: hideResolved ? '1' : '0' } }
     ).then((r) => r.data),
     placeholderData: (prev) => prev,
+    // 404s come from external website traffic (no CMS mutation creates them),
+    // so poll + refetch on focus to surface new misses without a manual reload.
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }
 

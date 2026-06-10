@@ -202,7 +202,7 @@ async function seed() {
   );
   await Setting.findOneAndUpdate(
     { key: 'analytics' },
-    { $set: { value: { ga4Id: '', gtmId: '', metaPixelId: '', headerScript: '', bodyScript: '', footerScript: '' } } },
+    { $set: { value: { ga4Id: '', gtmId: '', metaPixelId: '' } } },
     { upsert: true, setDefaultsOnInsert: true }
   );
   await Setting.findOneAndUpdate(

@@ -23,6 +23,7 @@ import {
 import { Label } from '@/components/ui/Label';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { RedirectDestinationInput } from '@/components/RedirectDestinationInput';
 import {
   useLogs404, useResolveLog404, useDeleteLog404, useCreateRedirect,
   type Log404,
@@ -145,7 +146,15 @@ export default function Logs404Page() {
             <div className="flex items-center justify-center text-fg-4"><ArrowRight className="size-4" /></div>
             <div>
               <Label htmlFor="r-to">To</Label>
-              <Input id="r-to" className="mt-1.5 font-mono" placeholder="/new-path" autoFocus value={redirectTo} onChange={(e) => setRedirectTo(e.target.value)} />
+              <RedirectDestinationInput
+                id="r-to"
+                className="mt-1.5 font-mono"
+                value={redirectTo}
+                onChange={setRedirectTo}
+                excludePath={redirectFor?.url}
+                enabled={!!redirectFor}
+                autoFocus
+              />
             </div>
           </div>
           <DialogFooter>
