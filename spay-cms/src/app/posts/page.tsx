@@ -119,7 +119,7 @@ export default function PostsPage() {
           ) : view === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 p-4 items-stretch">
               {items.map((p) => (
-                <Link href={`/posts/${p._id}`} key={p._id} className="spay-card-hover rounded-spay-md border border-line bg-surface/40 overflow-hidden group flex flex-col h-full">
+                <Link href={`/posts/edit?id=${p._id}`} key={p._id} className="spay-card-hover rounded-spay-md border border-line bg-surface/40 overflow-hidden group flex flex-col h-full">
                   <div className="aspect-[16/9] relative overflow-hidden shrink-0">
                     {p.cover ? <img src={p.cover} alt={p.title} className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" /> : <div className="absolute inset-0 bg-gradient-to-br from-cyan-300/[0.06] to-navy-900" />}
                     <div className="absolute inset-0 bg-gradient-to-t from-navy-950/70 to-transparent" />
@@ -160,7 +160,7 @@ export default function PostsPage() {
                             {p.cover && <img src={p.cover} alt="" className="w-full h-full object-cover" />}
                           </div>
                           <div className="min-w-0">
-                            <Link href={`/posts/${p._id}`} className="font-medium text-fg-1 hover:text-cyan-300 transition-colors block truncate">{p.title}</Link>
+                            <Link href={`/posts/edit?id=${p._id}`} className="font-medium text-fg-1 hover:text-cyan-300 transition-colors block truncate">{p.title}</Link>
                           </div>
                         </div>
                       </td>

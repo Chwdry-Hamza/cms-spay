@@ -383,7 +383,7 @@ function UsageList({ mediaId }: { mediaId: string }) {
 }
 
 function UsageRow({ ref }: { ref: MediaUsageRef }) {
-  const href = ref.type === 'page' ? `/pages/${ref.id}` : `/posts/${ref.id}`;
+  const href = ref.type === 'page' ? `/pages/edit?id=${ref.id}` : `/posts/edit?id=${ref.id}`;
   const viaLabel = ref.via === 'featured' ? 'Featured image' : 'Cover image';
   return (
     <li className="flex items-center gap-2 p-2 rounded-spay-sm border border-line bg-surface/30 hover:bg-surface/60 transition-colors">

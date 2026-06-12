@@ -147,7 +147,7 @@ export default function PagesPage() {
                   return (
                     <tr key={p._id} className="border-b border-line last:border-b-0 group transition-colors hover:bg-white/[0.02]">
                       <td className="pl-4 px-2 py-3 min-w-[220px]">
-                        <Link href={`/pages/${p._id}`} className="font-medium text-fg-1 hover:text-cyan-300 transition-colors">
+                        <Link href={`/pages/edit?id=${p._id}`} className="font-medium text-fg-1 hover:text-cyan-300 transition-colors">
                           {p.title}
                         </Link>
                       </td>

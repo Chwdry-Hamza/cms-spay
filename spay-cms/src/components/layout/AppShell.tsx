@@ -16,7 +16,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [cmdOpen, setCmdOpen] = React.useState(false);
 
-  const isLogin = pathname === '/login';
+  const isLogin = pathname === '/login' || pathname === '/login/';
 
   // Redirect unauthenticated users to /login (except already on /login)
   React.useEffect(() => {

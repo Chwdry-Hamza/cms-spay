@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { useRouter, useParams, usePathname } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, History, Eye, ChevronDown, Save, Send, CalendarClock,
   MoreHorizontal, CheckCircle2, RefreshCw, Trash2, Search as SearchIcon,
@@ -101,9 +101,8 @@ function emptyDraft(kind: Kind): Partial<Page & Post> {
 
 export function ContentEditor({ kind }: { kind: Kind }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const params = useParams() as { id?: string };
-  const id = params.id;
+  const searchParams = useSearchParams();
+  const id = searchParams.get('id') ?? undefined;
   const isNew = !id || id === 'new';
   const { toast } = useToast();
 
@@ -283,7 +282,7 @@ export function ContentEditor({ kind }: { kind: Kind }) {
           ? await createPage.mutateAsync(payload)
           : await createPost.mutateAsync(payload);
         toast({ title: `${kind === 'page' ? 'Page' : 'Post'} created`, variant: 'success' });
-        router.replace(`/${kind === 'page' ? 'pages' : 'posts'}/${saved._id}`);
+        router.replace(`/${kind === 'page' ? 'pages' : 'posts'}/edit?id=${saved._id}`);
       } else {
         saved = kind === 'page'
           ? await updatePage.mutateAsync(payload)
