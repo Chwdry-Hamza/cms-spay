@@ -1,0 +1,45 @@
+name: Deploy CMS Admin to gh-pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'spay-cms/**'
+      - '.github/workflows/deploy-cms.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spay-cms
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: spay-cms/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
+
+      - name: Add .nojekyll file
+        run: touch out/.nojekyll
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: spay-cms/out
+          publish_branch: gh-pages
+          cname: cmsspay.com
