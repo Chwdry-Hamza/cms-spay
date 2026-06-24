@@ -64,6 +64,25 @@ export const performanceSchema = z.object({
   lazyLoadImages:    z.boolean().default(true),
 }).default({});
 
+/**
+ * Per-page custom code injection — raw HTML/JS snippets the editor wants to
+ * drop into a single page or post (analytics pixels, chat widgets, A/B test
+ * tags, verification meta, etc.). Rendered verbatim on the public site:
+ *
+ *   header → emitted high in the document (think <head>: tracking, pixels)
+ *   body   → emitted at the top of the page body (widgets, banners)
+ *   footer → emitted at the end of the page body (deferred scripts)
+ *
+ * Intentionally NOT sanitized — these are admin-authored and the whole point is
+ * to allow <script>. Only authenticated CMS users can write them. Capped to a
+ * sane length to avoid storing accidental megabyte pastes.
+ */
+export const codeInjectionSchema = z.object({
+  header: z.string().max(50_000).default(''),
+  body:   z.string().max(50_000).default(''),
+  footer: z.string().max(50_000).default(''),
+}).default({});
+
 export const listQuerySchema = z.object({
   q:        z.string().optional(),
   status:   z.string().optional(),

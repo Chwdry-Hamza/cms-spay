@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { Redirect } from '../models/Redirect';
+import { Page } from '../models/Page';
+import { Post } from '../models/Post';
 import { ApiError } from '../utils/ApiError';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authRequired, authOptional } from '../middleware/auth.middleware';
@@ -48,6 +50,19 @@ redirectRoutes.post(
     if (await Redirect.findOne({ from: body.from })) {
       throw ApiError.conflict(`A redirect for "${body.from}" already exists`);
     }
+
+    // Guard: a redirect runs in the website middleware BEFORE the page route, so
+    // a `from` that matches a live page/post slug would make that content
+    // permanently unreachable (it would 301 away before rendering). Block it —
+    // to move a page, change its slug (which auto-creates the redirect for you).
+    const pageAtFrom = await Page.findOne({ slug: body.from }).select('_id').lean();
+    const postAtFrom = body.from.startsWith('/blog/')
+      ? await Post.findOne({ slug: body.from.slice('/blog/'.length) }).select('_id').lean()
+      : null;
+    if (pageAtFrom || postAtFrom) {
+      throw ApiError.conflict(`A ${pageAtFrom ? 'page' : 'post'} already exists at "${body.from}".`);
+    }
+
     const created = await Redirect.create(body);
     triggerRevalidate(body.from);
     res.status(201).json(created);

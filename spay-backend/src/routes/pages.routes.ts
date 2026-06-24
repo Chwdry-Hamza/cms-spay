@@ -97,6 +97,10 @@ pageRoutes.post(
       publishedAt: body.status === 'published' ? new Date() : undefined,
     });
 
+    // A page now lives at this slug, so any redirect FROM this URL is obsolete
+    // and would shadow the page (redirects run before the page route). Remove it.
+    await Redirect.deleteMany({ from: slug });
+
     await page.populate('featuredImage', 'name url alt variants width height');
     triggerContentRevalidate(['/', slug], 'page');
     res.status(201).json(page);
@@ -158,6 +162,10 @@ pageRoutes.put(
         logger.warn(`[pages] failed to auto-create redirect for ${beforeSlug}`, err);
       }
     }
+
+    // The page now lives at existing.slug — remove any redirect FROM that URL so
+    // it can't shadow the page (content always wins over a stale redirect).
+    await Redirect.deleteMany({ from: existing.slug });
 
     // revalidate old and new paths in case slug or status changed
     const paths = new Set<string>(['/', existing.slug]);

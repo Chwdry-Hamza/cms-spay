@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { seoSchema, statusEnum, structuredDataSchema, performanceSchema } from './common.schema';
+import { seoSchema, statusEnum, structuredDataSchema, performanceSchema, codeInjectionSchema } from './common.schema';
 
 export const postCreateSchema = z.object({
   title:   z.string().min(1).max(200),
@@ -15,6 +15,7 @@ export const postCreateSchema = z.object({
   seo:     seoSchema.optional(),
   schema:  structuredDataSchema.optional(),
   performance: performanceSchema.optional(),
+  codeInjection: codeInjectionSchema.optional(),
   scheduledAt: z.coerce.date().optional(),
 });
 

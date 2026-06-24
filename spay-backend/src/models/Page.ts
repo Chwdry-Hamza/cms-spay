@@ -47,6 +47,17 @@ const PerformanceSchema = new Schema(
   { _id: false }
 );
 
+// Per-page raw HTML/JS injected into the public page. See codeInjectionSchema
+// in schemas/common.schema.ts for the rationale (admin-authored, unsanitized).
+const CodeInjectionSchema = new Schema(
+  {
+    header: { type: String, default: '' },
+    body:   { type: String, default: '' },
+    footer: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const PageSchema = new Schema(
   {
     title:    { type: String, required: true, trim: true },
@@ -66,6 +77,7 @@ const PageSchema = new Schema(
     seo:           { type: SEOSchema, default: () => ({}) },
     schema:        { type: StructuredDataSchema, default: () => ({}) },
     performance:   { type: PerformanceSchema, default: () => ({}) },
+    codeInjection: { type: CodeInjectionSchema, default: () => ({}) },
     featuredImage: { type: Schema.Types.ObjectId, ref: 'Media' },
 
     author:      { type: Schema.Types.ObjectId, ref: 'User' },

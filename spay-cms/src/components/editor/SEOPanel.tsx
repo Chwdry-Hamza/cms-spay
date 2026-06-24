@@ -17,9 +17,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/Accordion';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance } from '@/lib/queries';
+import { type SEO, type MediaItem, type StructuredData, emptyStructuredData, type Performance, emptyPerformance, type CodeInjection, emptyCodeInjection, useUploadMedia, useMedia } from '@/lib/queries';
 import { MediaPickerModal } from '@/components/MediaPickerModal';
-import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Activity } from 'lucide-react';
+import { AltReviewModal } from '@/components/AltReviewModal';
+import { useToast } from '@/components/ui/Toaster';
+import { apiErrorMessage } from '@/lib/api';
+import { Plus, Trash2, Code2, HelpCircle, Briefcase, Newspaper, Activity, Loader2, UploadCloud } from 'lucide-react';
 
 // Used to build the canonical-URL preview. Driven by the deployed site URL so
 // canonicals match the real domain; falls back to the production domain.
@@ -43,6 +46,8 @@ type Props = {
   onSchemaChange?: (next: StructuredData) => void;
   performance?: Performance | null | undefined;
   onPerformanceChange?: (next: Performance) => void;
+  codeInjection?: CodeInjection | null | undefined;
+  onCodeInjectionChange?: (next: CodeInjection) => void;
   kind?: 'page' | 'post';
   editor?: TiptapEditorType | null;
   /** Used to fetch related-content suggestions */
@@ -58,6 +63,7 @@ type Props = {
 export function SEOPanel({
   title, slug, seo: seoProp, onChange, schema: schemaProp, onSchemaChange,
   performance: perfProp, onPerformanceChange,
+  codeInjection: codeProp, onCodeInjectionChange,
   kind = 'page', editor,
   featuredImage, onFeaturedImageChange,
 }: Props) {
@@ -74,6 +80,14 @@ export function SEOPanel({
   );
   const patchPerf = (partial: Partial<Performance>) =>
     onPerformanceChange?.({ ...perf, ...partial });
+
+  const code: CodeInjection = React.useMemo(
+    () => ({ ...emptyCodeInjection, ...(codeProp ?? {}) }),
+    [codeProp],
+  );
+  const patchCode = (partial: Partial<CodeInjection>) =>
+    onCodeInjectionChange?.({ ...code, ...partial });
+  const codeBlockCount = [code.header, code.body, code.footer].filter((s) => s.trim()).length;
   const seo: SEO = React.useMemo(() => ({ ...defaultSEO, ...(seoProp ?? {}), og: { ...defaultSEO.og, ...(seoProp?.og ?? {}) }, twitter: { ...defaultSEO.twitter, ...(seoProp?.twitter ?? {}) } }), [seoProp]);
   const patch = (partial: Partial<SEO>) => onChange({ ...seo, ...partial });
   const patchOG = (partial: Partial<SEO['og']>) => onChange({ ...seo, og: { ...seo.og, ...partial } });
@@ -92,6 +106,35 @@ export function SEOPanel({
   // ─── Featured / OG / Twitter image picker state ───────────────
   const [pickerOpen, setPickerOpen] = React.useState<null | 'featured' | 'og' | 'twitter'>(null);
   const featured = typeof featuredImage === 'object' && featuredImage ? featuredImage : null;
+
+  // ─── Drag-and-drop upload (featured / OG / Twitter images) ─────
+  const upload = useUploadMedia();
+  const { toast } = useToast();
+  // After a drop-upload, prompt for alt text (same flow as the Media Library).
+  const [altReviewItems, setAltReviewItems] = React.useState<MediaItem[]>([]);
+
+  // Upload the first image file from a drop and return the created Media.
+  const uploadOne = async (files: FileList | File[] | null | undefined): Promise<MediaItem | null> => {
+    const file = Array.from(files ?? []).find((f) => f.type.startsWith('image/'));
+    if (!file) {
+      toast({ title: 'Drop an image file', description: 'Only image files can be uploaded here.', variant: 'warning' });
+      return null;
+    }
+    try {
+      const items = await upload.mutateAsync([file]);
+      const media = items[0] ?? null;
+      if (media) {
+        toast({ title: 'Image uploaded', variant: 'success' });
+        // Newly uploaded images have no alt yet — open the alt-text prompt.
+        if (!media.alt?.trim()) setAltReviewItems([media]);
+      }
+      return media;
+    } catch (err) {
+      toast({ title: 'Upload failed', description: apiErrorMessage(err), variant: 'danger' });
+      return null;
+    }
+  };
+
   const featuredAlt = featured?.alt ?? '';
   const featuredUrl = featured?.url ?? '';
 
@@ -99,6 +142,40 @@ export function SEOPanel({
   // Twitter image      → explicit value → OG image → featured image
   const resolvedOgImage = seo.og.image || featuredUrl;
   const resolvedTwitterImage = seo.twitter.image || resolvedOgImage;
+
+  // Resolve the alt text of an explicitly-set OG/Twitter image by matching its
+  // URL against the media library, so we can flag a missing-alt the same way the
+  // featured image does. Falls back to undefined for external/unknown URLs.
+  const { data: mediaImages = [] } = useMedia({ type: 'image' });
+  const altForUrl = (url?: string): { known: boolean; alt: string } => {
+    if (!url) return { known: false, alt: '' };
+    const m = mediaImages.find((x) => x.url === url || x.variants?.thumbnail === url);
+    return m ? { known: true, alt: m.alt ?? '' } : { known: false, alt: '' };
+  };
+
+  // Build the status badge + caption for a social image field, consistent with
+  // the featured image (alt set / no alt + the alt text or a missing-alt error).
+  const socialMeta = (explicitUrl: string, fallbackBadgeText: string) => {
+    if (explicitUrl) {
+      const { known, alt } = altForUrl(explicitUrl);
+      if (known && !alt.trim()) {
+        return {
+          badge: <Badge variant="warning" size="sm">no alt</Badge>,
+          caption: <span className="text-danger">Missing alt text — add it for SEO &amp; accessibility.</span>,
+        };
+      }
+      if (known) {
+        return {
+          badge: <Badge variant="success" size="sm">alt set</Badge>,
+          caption: <span className="text-fg-3 italic">&quot;{alt}&quot;</span>,
+        };
+      }
+      return { badge: undefined, caption: undefined }; // external / unknown URL
+    }
+    return { badge: <Badge variant="default" size="sm">{fallbackBadgeText}</Badge>, caption: undefined };
+  };
+  const ogMeta = socialMeta(seo.og.image, featuredUrl ? 'using featured' : 'not set');
+  const twitterMeta = socialMeta(seo.twitter.image ?? '', resolvedOgImage ? 'using OG / featured' : 'not set');
 
   // ─── Optional content warnings ─────────────────────────────────
   const warnings = React.useMemo(() => {
@@ -208,43 +285,29 @@ export function SEOPanel({
               </span>
             </AccordionTrigger>
             <AccordionContent className="space-y-3">
-              {featured ? (
-                <div className="rounded-spay-md border border-line bg-surface/40 overflow-hidden">
-                  <div className="aspect-[16/9] bg-surface relative overflow-hidden">
-                    <img src={featuredUrl} alt={featuredAlt} className="absolute inset-0 w-full h-full object-cover" />
-                  </div>
-                  <div className="p-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-fg-4 font-semibold mb-1">Alt text</p>
-                    {featuredAlt ? (
-                      <p className="text-sm text-fg-2 italic">&quot;{featuredAlt}&quot;</p>
-                    ) : (
-                      <p className="text-sm text-danger">Missing — edit in Media Library to add alt text for SEO + accessibility.</p>
-                    )}
-                    <div className="flex gap-2 mt-3">
-                      <Button size="sm" variant="secondary" onClick={() => setPickerOpen('featured')}>
-                        <ImagePickerIcon className="size-3.5" />
-                        Change
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => onFeaturedImageChange?.(null)}>
-                        <X />
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen('featured')}
-                  className="w-full rounded-spay-md border border-dashed border-line-strong bg-surface/40 px-4 py-6 text-center hover:border-cyan-300/40 transition-colors"
-                >
-                  <div className="inline-flex items-center justify-center size-9 rounded-spay-md bg-cyan-300/10 border border-cyan-300/25 text-cyan-300 mb-2">
-                    <ImagePickerIcon className="size-4" />
-                  </div>
-                  <p className="text-sm font-medium text-fg-1">Pick a featured image</p>
-                  <p className="text-[11px] text-fg-3 mt-0.5">Used as the OG image fallback for social previews.</p>
-                </button>
-              )}
+              <ImageField
+                label="Featured image"
+                statusBadge={
+                  featured
+                    ? (featuredAlt ? <Badge variant="success" size="sm">alt set</Badge> : <Badge variant="warning" size="sm">no alt</Badge>)
+                    : <Badge variant="default" size="sm">not set</Badge>
+                }
+                previewUrl={featuredUrl || undefined}
+                emptyText="No image — pick from library or drop a file"
+                pickLabel={featured ? 'Change' : 'Pick'}
+                onPick={() => setPickerOpen('featured')}
+                onRemove={featured ? () => onFeaturedImageChange?.(null) : undefined}
+                removeLabel="Remove"
+                caption={
+                  featured
+                    ? (featuredAlt
+                        ? <span className="text-fg-3 italic">&quot;{featuredAlt}&quot;</span>
+                        : <span className="text-danger">Missing alt text — add it for SEO &amp; accessibility.</span>)
+                    : undefined
+                }
+                uploading={upload.isPending}
+                onDropFiles={async (files) => { const m = await uploadOne(files); if (m) onFeaturedImageChange?.(m._id, m); }}
+              />
             </AccordionContent>
           </AccordionItem>
 
@@ -313,14 +376,18 @@ export function SEOPanel({
                     <Label>OG description</Label>
                     <Textarea className="mt-1.5" rows={2} value={seo.og.description} onChange={(e) => patchOG({ description: e.target.value })} placeholder={seo.description} />
                   </div>
-                  <SocialImageField
+                  <ImageField
                     label="OG image"
-                    explicitUrl={seo.og.image}
-                    resolvedUrl={resolvedOgImage}
-                    fallbackHint={!seo.og.image && featuredUrl ? 'using Featured image as fallback' : !seo.og.image ? 'no image set' : undefined}
+                    statusBadge={ogMeta.badge}
+                    previewUrl={resolvedOgImage || undefined}
+                    emptyText="No image — pick from library or drop a file"
+                    pickLabel={seo.og.image ? 'Change' : 'Pick'}
                     onPick={() => setPickerOpen('og')}
-                    onClear={() => patchOG({ image: '' })}
-                    onChangeUrl={(v) => patchOG({ image: v })}
+                    onRemove={seo.og.image ? () => patchOG({ image: '' }) : undefined}
+                    removeLabel="Remove"
+                    caption={ogMeta.caption}
+                    uploading={upload.isPending}
+                    onDropFiles={async (files) => { const m = await uploadOne(files); if (m) patchOG({ image: m.url }); }}
                   />
                 </TabsContent>
 
@@ -344,20 +411,18 @@ export function SEOPanel({
                     <Label>Twitter description</Label>
                     <Textarea className="mt-1.5" rows={2} value={seo.twitter.description} onChange={(e) => patchTW({ description: e.target.value })} placeholder={seo.description} />
                   </div>
-                  <SocialImageField
+                  <ImageField
                     label="Twitter image"
-                    explicitUrl={seo.twitter.image ?? ''}
-                    resolvedUrl={resolvedTwitterImage}
-                    fallbackHint={
-                      !seo.twitter.image && resolvedOgImage
-                        ? 'using OG image as fallback'
-                        : !seo.twitter.image
-                        ? 'no image set'
-                        : undefined
-                    }
+                    statusBadge={twitterMeta.badge}
+                    previewUrl={resolvedTwitterImage || undefined}
+                    emptyText="No image — pick from library or drop a file"
+                    pickLabel={seo.twitter.image ? 'Change' : 'Pick'}
                     onPick={() => setPickerOpen('twitter')}
-                    onClear={() => patchTW({ image: '' })}
-                    onChangeUrl={(v) => patchTW({ image: v })}
+                    onRemove={seo.twitter.image ? () => patchTW({ image: '' }) : undefined}
+                    removeLabel="Remove"
+                    caption={twitterMeta.caption}
+                    uploading={upload.isPending}
+                    onDropFiles={async (files) => { const m = await uploadOne(files); if (m) patchTW({ image: m.url }); }}
                   />
                 </TabsContent>
               </Tabs>
@@ -430,6 +495,39 @@ export function SEOPanel({
               />
             </AccordionContent>
           </AccordionItem>
+
+          {onCodeInjectionChange && (
+            <AccordionItem value="code-injection" className="px-5">
+              <AccordionTrigger>
+                <span className="flex items-center gap-2">
+                  Code Injection
+                  <Badge variant={codeBlockCount ? 'cyan' : 'default'} size="sm">
+                    {codeBlockCount ? `${codeBlockCount} active` : 'none'}
+                  </Badge>
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className="space-y-4">
+                <CodeBlockField
+                  label="Header"
+                  value={code.header}
+                  onChange={(v) => patchCode({ header: v })}
+                  placeholder={'<!-- e.g. <script src="https://example.com/pixel.js"></script> -->'}
+                />
+                <CodeBlockField
+                  label="Body"
+                  value={code.body}
+                  onChange={(v) => patchCode({ body: v })}
+                  placeholder={'<!-- markup or scripts to run inside the page body -->'}
+                />
+                <CodeBlockField
+                  label="Footer"
+                  value={code.footer}
+                  onChange={(v) => patchCode({ footer: v })}
+                  placeholder={'<!-- e.g. deferred <script> tags -->'}
+                />
+              </AccordionContent>
+            </AccordionItem>
+          )}
         </Accordion>
 
         {/* Media picker — context-aware per which field opened it */}
@@ -449,52 +547,89 @@ export function SEOPanel({
           }}
         />
 
+        {/* Alt-text prompt after a drag-and-drop upload (featured / OG / Twitter) */}
+        <AltReviewModal
+          items={altReviewItems}
+          required={false}
+          onClose={() => setAltReviewItems([])}
+          onSaved={(saved) => {
+            // If the saved image is the current featured/cover, refresh its alt
+            // so the preview + "missing alt" warning update immediately.
+            const f = saved.find((s) => featured && s._id === featured._id);
+            if (f) onFeaturedImageChange?.(f._id, f);
+          }}
+        />
+
       </div>
     </div>
   );
 }
 
-/** Combined image picker + URL input + live preview for OG/Twitter image fields. */
-function SocialImageField({
-  label, explicitUrl, resolvedUrl, fallbackHint, onPick, onClear, onChangeUrl,
+/**
+ * Unified image control used by the Featured, OG, and Twitter fields so they all
+ * look the same: label + status badge on top, a preview that accepts drag-and-drop
+ * upload, the Pick/Change + Remove/Clear buttons below it, then an optional caption.
+ */
+function ImageField({
+  label, statusBadge, previewUrl, emptyText, pickLabel, onPick, onRemove, removeLabel, caption, onDropFiles, uploading,
 }: {
   label: string;
-  explicitUrl: string;
-  resolvedUrl: string;
-  fallbackHint?: string;
+  statusBadge?: React.ReactNode;
+  previewUrl?: string;
+  emptyText: string;
+  pickLabel: string;
   onPick: () => void;
-  onClear: () => void;
-  onChangeUrl: (v: string) => void;
+  onRemove?: () => void;
+  removeLabel?: string;
+  caption?: React.ReactNode;
+  onDropFiles?: (files: FileList | File[]) => void;
+  uploading?: boolean;
 }) {
+  const [dragging, setDragging] = React.useState(false);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <Label>{label}</Label>
-        {fallbackHint && <Badge variant="default" size="sm">{fallbackHint}</Badge>}
+        {statusBadge}
       </div>
-      <div className="rounded-spay-md border border-line bg-surface/40 overflow-hidden">
-        {resolvedUrl ? (
+      <div
+        className={cn(
+          'relative rounded-spay-md border bg-surface/40 overflow-hidden transition-colors',
+          dragging ? 'border-cyan-300/60 ring-2 ring-cyan-300/20' : 'border-line',
+        )}
+        onDragOver={onDropFiles ? (e) => { e.preventDefault(); if (!dragging) setDragging(true); } : undefined}
+        onDragLeave={onDropFiles ? (e) => { e.preventDefault(); setDragging(false); } : undefined}
+        onDrop={onDropFiles ? (e) => { e.preventDefault(); setDragging(false); onDropFiles(e.dataTransfer?.files); } : undefined}
+      >
+        {(dragging || uploading) && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 rounded-spay-md border-2 border-dashed border-cyan-300/60 bg-surface-deepest/80 backdrop-blur-sm pointer-events-none">
+            {uploading ? <Loader2 className="size-5 animate-spin text-cyan-300" /> : <UploadCloud className="size-5 text-cyan-300" />}
+            <p className="text-[11px] font-medium text-cyan-300">{uploading ? 'Uploading…' : 'Drop image to upload'}</p>
+          </div>
+        )}
+        {previewUrl ? (
           <div className="aspect-[1.91/1] bg-surface relative overflow-hidden">
-            <img src={resolvedUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+            <img src={previewUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
           </div>
         ) : (
-          <div className="aspect-[1.91/1] bg-surface flex items-center justify-center text-fg-4 text-xs">
-            no preview
+          <div className="aspect-[1.91/1] bg-surface flex items-center justify-center text-center px-3 text-fg-4 text-xs">
+            {emptyText}
           </div>
         )}
         <div className="flex items-center gap-2 p-2 border-t border-line">
           <Button size="sm" variant="secondary" onClick={onPick}>
             <ImageGlyph className="size-3.5" />
-            Pick
+            {pickLabel}
           </Button>
-          {explicitUrl && (
-            <Button size="sm" variant="ghost" className="text-fg-3 hover:text-fg-1" onClick={onClear}>
+          {onRemove && (
+            <Button size="sm" variant="ghost" className="text-fg-3 hover:text-fg-1" onClick={onRemove}>
               <X className="size-3.5" />
-              Clear
+              {removeLabel}
             </Button>
           )}
         </div>
       </div>
+      {caption && <div className="text-[11px] leading-relaxed">{caption}</div>}
     </div>
   );
 }
@@ -699,6 +834,39 @@ function CustomJsonLdEditor({
           <span>Valid JSON — will be injected as-is on the live page.</span>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* ─── Code-injection textarea ────────────────────────────────────── */
+
+function CodeBlockField({
+  label, value, onChange, placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="flex items-center gap-1.5">
+          <Code2 className="size-3.5 text-fg-4" />
+          {label}
+        </Label>
+        {value.trim() && <Badge variant="cyan" size="sm">set</Badge>}
+      </div>
+      <div className="rounded-spay-md border border-line bg-surface-deepest overflow-hidden">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          rows={5}
+          placeholder={placeholder}
+          className="w-full p-3 bg-transparent font-mono text-[11px] text-fg-1 placeholder:text-fg-4 outline-none resize-y leading-relaxed"
+        />
+      </div>
     </div>
   );
 }

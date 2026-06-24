@@ -47,6 +47,17 @@ const PerformanceSchema = new Schema(
   { _id: false }
 );
 
+// Per-post raw HTML/JS injected into the public post. See codeInjectionSchema
+// in schemas/common.schema.ts for the rationale (admin-authored, unsanitized).
+const CodeInjectionSchema = new Schema(
+  {
+    header: { type: String, default: '' },
+    body:   { type: String, default: '' },
+    footer: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const PostSchema = new Schema(
   {
     title:   { type: String, required: true, trim: true },
@@ -67,6 +78,7 @@ const PostSchema = new Schema(
     seo:         { type: SEOSchema, default: () => ({}) },
     schema:      { type: StructuredDataSchema, default: () => ({}) },
     performance: { type: PerformanceSchema, default: () => ({}) },
+    codeInjection: { type: CodeInjectionSchema, default: () => ({}) },
 
     author:     { type: Schema.Types.ObjectId, ref: 'User' },
     authorName: { type: String, default: '' },

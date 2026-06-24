@@ -108,6 +108,10 @@ postRoutes.post(
       publishedAt: body.status === 'published' ? new Date() : undefined,
     });
 
+    // A post now lives at this URL, so drop any redirect FROM it (it would
+    // shadow the post — redirects run before the post route).
+    await Redirect.deleteMany({ from: `/blog/${slug}` });
+
     await post.populate([
       { path: 'coverMedia', select: 'name url alt variants width height' },
       { path: 'category', select: 'name slug color' },
@@ -178,6 +182,10 @@ postRoutes.put(
         logger.warn(`[posts] failed to auto-create redirect for ${fromPath}`, err);
       }
     }
+
+    // The post now lives at this URL — remove any redirect FROM it so it can't
+    // shadow the post (content always wins over a stale redirect).
+    await Redirect.deleteMany({ from: `/blog/${existing.slug}` });
 
     const paths = new Set<string>(['/blog', `/blog/${existing.slug}`]);
     if (beforeSlug !== existing.slug) paths.add(`/blog/${beforeSlug}`);

@@ -2,25 +2,27 @@
 
 import React from 'react';
 import {
-  Search, ArrowRight, Trash2, X, ArrowRightLeft,
+  Search, ArrowRight, Trash2, X, ArrowRightLeft, Plus, Loader2,
 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toaster';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { useRedirects, useDeleteRedirect } from '@/lib/queries';
+import { useRedirects, useCreateRedirect, useDeleteRedirect } from '@/lib/queries';
 import { apiErrorMessage } from '@/lib/api';
 import { relativeTime } from '@/lib/utils';
 
 export default function RedirectsPage() {
   const [query, setQuery] = React.useState('');
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [addOpen, setAddOpen] = React.useState(false);
   const { toast } = useToast();
 
   const { data = [], isLoading } = useRedirects(query || undefined);
@@ -28,7 +30,14 @@ export default function RedirectsPage() {
 
   return (
     <PageContainer>
-      <PageHeader title="Redirects" />
+      <PageHeader
+        title="Redirects"
+        actions={
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus />New redirect
+          </Button>
+        }
+      />
 
       <Card>
         <div className="px-4 py-3 border-b border-line flex flex-wrap items-center gap-2">
@@ -50,7 +59,8 @@ export default function RedirectsPage() {
               <EmptyState
                 icon={<ArrowRightLeft />}
                 title={query ? 'No matching redirects' : 'No redirects yet'}
-                description="Redirects are created automatically when you change a page or post's slug, so old links keep working."
+                description="Forward an old URL to a working page."
+                action={!query ? <Button size="sm" onClick={() => setAddOpen(true)}><Plus />New redirect</Button> : undefined}
               />
             </div>
           ) : (
@@ -84,6 +94,9 @@ export default function RedirectsPage() {
         </CardContent>
       </Card>
 
+      {/* Create */}
+      <AddRedirectDialog open={addOpen} onOpenChange={setAddOpen} />
+
       {/* Delete */}
       <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <DialogContent>
@@ -107,5 +120,98 @@ export default function RedirectsPage() {
         </DialogContent>
       </Dialog>
     </PageContainer>
+  );
+}
+
+/**
+ * Create a custom redirect. Mirrors the backend rules (redirects.routes.ts):
+ *   - `from` must be a site-relative path starting with "/" (max 500)
+ *   - `to`   may be a relative path or an absolute URL (max 800)
+ * A leading slash is auto-added to `from` if the user omits it.
+ */
+function AddRedirectDialog({
+  open, onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
+  const create = useCreateRedirect();
+  const { toast } = useToast();
+  const [from, setFrom] = React.useState('');
+  const [to, setTo] = React.useState('');
+
+  // Reset fields whenever the dialog opens.
+  React.useEffect(() => {
+    if (open) { setFrom(''); setTo(''); }
+  }, [open]);
+
+  const normalizeFrom = (v: string) => {
+    const t = v.trim();
+    if (!t) return '';
+    return t.startsWith('/') ? t : `/${t}`;
+  };
+
+  const cleanFrom = normalizeFrom(from);
+  const cleanTo = to.trim();
+  const isAbsolute = /^https?:\/\//i.test(cleanTo);
+  const toValid = isAbsolute || cleanTo.startsWith('/');
+  const canSave = cleanFrom.length > 1 && cleanTo.length > 0 && toValid && cleanFrom !== cleanTo;
+
+  const submit = async () => {
+    if (!canSave) return;
+    try {
+      await create.mutateAsync({ from: cleanFrom, to: cleanTo });
+      toast({ title: 'Redirect created', variant: 'success' });
+      onOpenChange(false);
+    } catch (err) {
+      toast({ title: 'Could not create redirect', description: apiErrorMessage(err), variant: 'danger' });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New redirect</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="redir-from">From</Label>
+            <Input
+              id="redir-from"
+              className="mt-1.5 font-mono"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSave) submit(); }}
+              placeholder="/old-page"
+              autoFocus
+            />
+          </div>
+
+          <div className="flex justify-center text-fg-4"><ArrowRight className="size-4" /></div>
+
+          <div>
+            <Label htmlFor="redir-to">To</Label>
+            <Input
+              id="redir-to"
+              className="mt-1.5 font-mono"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSave) submit(); }}
+              placeholder="/new-page"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={!canSave || create.isPending}>
+            {create.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            {create.isPending ? 'Creating…' : 'Create redirect'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

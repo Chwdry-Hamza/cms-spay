@@ -3,7 +3,7 @@
 import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Upload, Search, LayoutGrid, List as ListIcon, Image as ImageIcon, FileText, FileVideo,
+  Upload, UploadCloud, Search, LayoutGrid, List as ListIcon, Image as ImageIcon, FileText, FileVideo,
   MoreHorizontal, Trash2, Copy, X, Loader2,
 } from 'lucide-react';
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
@@ -22,8 +22,8 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/Dialog';
-import { Textarea } from '@/components/ui/Textarea';
 import { useMedia, useUploadMedia, useUpdateMedia, useDeleteMedia, useMediaUsage, type MediaItem, type MediaUsageRef } from '@/lib/queries';
+import { AltReviewModal } from '@/components/AltReviewModal';
 import { apiErrorMessage } from '@/lib/api';
 import { cn, relativeTime } from '@/lib/utils';
 import { AlertTriangle, FileEdit, Link as LinkIcon } from 'lucide-react';
@@ -41,6 +41,10 @@ export default function MediaPage() {
   const [openItem, setOpenItem] = React.useState<MediaItem | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Drag-and-drop upload. dragDepth counts enter/leave across nested children so
+  // the overlay doesn't flicker as the cursor moves over inner elements.
+  const [dragging, setDragging] = React.useState(false);
+  const dragDepth = React.useRef(0);
   const { toast } = useToast();
 
   const filter = React.useMemo(() => ({
@@ -81,6 +85,34 @@ export default function MediaPage() {
     }
   };
 
+  // Only react to OS file drags (not in-page element drags).
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer?.types?.includes('Files');
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (hasFiles(e)) e.preventDefault();
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragging(false);
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    handleUpload(Array.from(e.dataTransfer?.files ?? []));
+  };
+
   return (
     <PageContainer>
       <PageHeader
@@ -107,6 +139,20 @@ export default function MediaPage() {
         }}
       />
 
+      <div
+        className="relative"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {dragging && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 rounded-spay-lg border-2 border-dashed border-cyan-300/60 bg-surface-deepest/85 backdrop-blur-sm pointer-events-none">
+            <UploadCloud className="size-8 text-cyan-300" />
+            <p className="text-sm font-semibold text-cyan-300">Drop files to upload</p>
+            <p className="text-[11px] text-fg-3">Images, PDFs, or video clips</p>
+          </div>
+        )}
       <Card>
         <div className="px-4 py-3 border-b border-line flex flex-wrap items-center gap-2">
           <div className="flex-1 min-w-[220px] max-w-md">
@@ -218,6 +264,7 @@ export default function MediaPage() {
           )}
         </CardContent>
       </Card>
+      </div>
 
       {/* Detail dialog */}
       <Dialog open={!!openItem} onOpenChange={(o) => !o && setOpenItem(null)}>
@@ -445,100 +492,3 @@ function DeleteMediaDialog({
   );
 }
 
-/* ─── Post-upload alt-text review modal ───────────────────────── */
-
-function AltReviewModal({
-  items, required, onClose,
-}: {
-  items: MediaItem[];
-  required: boolean;
-  onClose: () => void;
-}) {
-  const [drafts, setDrafts] = React.useState<Record<string, string>>({});
-  const update = useUpdateMedia();
-  const { toast } = useToast();
-
-  // Reset when a new batch arrives.
-  React.useEffect(() => {
-    if (items.length) setDrafts(Object.fromEntries(items.map((i) => [i._id, i.alt ?? ''])));
-  }, [items]);
-
-  if (items.length === 0) return null;
-
-  const missing = items.filter((i) => !(drafts[i._id] ?? '').trim()).length;
-  const canSave = !required || missing === 0;
-
-  const saveAll = async () => {
-    const tasks = items
-      .filter((i) => (drafts[i._id] ?? '') !== (i.alt ?? ''))
-      .map((i) => update.mutateAsync({ id: i._id, alt: drafts[i._id] ?? '' }));
-    try {
-      await Promise.all(tasks);
-      toast({ title: 'Alt text saved', variant: 'success' });
-      onClose();
-    } catch (err) {
-      toast({ title: 'Save failed', description: apiErrorMessage(err), variant: 'danger' });
-    }
-  };
-
-  return (
-    <Dialog
-      open={items.length > 0}
-      onOpenChange={(o) => {
-        // When the rule is on, prevent close-by-clicking-outside.
-        if (!o && !required) onClose();
-      }}
-    >
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="size-4 text-warning" />
-            Add alt text for {items.length} new image{items.length === 1 ? '' : 's'}
-          </DialogTitle>
-          <DialogDescription>
-            {required
-              ? 'Alt text is required by your media rules. Fill each one to continue — describe what the image shows so it works for screen readers and SEO.'
-              : 'Recommended for accessibility and SEO. You can skip for now and edit later.'}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
-          {items.map((m) => (
-            <div key={m._id} className="flex gap-3 p-2.5 rounded-spay-md border border-line bg-surface/40">
-              <div className="size-16 rounded-spay-sm overflow-hidden bg-surface shrink-0">
-                <img src={m.variants?.thumbnail || m.url} alt="" className="w-full h-full object-cover" />
-              </div>
-              <div className="flex-1 min-w-0 space-y-1">
-                <p className="text-xs font-mono text-fg-3 truncate" title={m.name}>{m.name}</p>
-                <Textarea
-                  rows={2}
-                  value={drafts[m._id] ?? ''}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [m._id]: e.target.value }))}
-                  placeholder="e.g. Crypto-and-fiat balance shown in the Spay mobile app"
-                  className="text-sm"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <DialogFooter>
-          {!required && (
-            <Button variant="ghost" onClick={onClose} className="mr-auto">
-              Skip — I'll do it later
-            </Button>
-          )}
-          {required && missing > 0 && (
-            <p className="text-[11px] text-danger mr-auto self-center">
-              {missing} still missing
-            </p>
-          )}
-          <Button onClick={saveAll} disabled={!canSave || update.isPending}>
-            {update.isPending ? <Loader2 className="animate-spin" /> : null}
-            Save alt text
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

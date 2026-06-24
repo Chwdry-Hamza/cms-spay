@@ -97,6 +97,19 @@ export const emptyPerformance: Performance = {
   skipAnalytics: false,
 };
 
+/** Per-page/post raw HTML/JS snippets (header / body / footer). */
+export type CodeInjection = {
+  header: string;
+  body: string;
+  footer: string;
+};
+
+export const emptyCodeInjection: CodeInjection = {
+  header: '',
+  body: '',
+  footer: '',
+};
+
 export type Page = {
   _id: string;
   title: string;
@@ -110,6 +123,7 @@ export type Page = {
   seo: SEO;
   schema?: StructuredData;
   performance?: Performance;
+  codeInjection?: CodeInjection;
   featuredImage?: string | { _id: string; url: string; alt: string; variants?: Record<string, string>; width?: number; height?: number } | null;
   authorName?: string;
   publishedAt?: string | null;
@@ -133,6 +147,7 @@ export type Post = {
   seo: SEO;
   schema?: StructuredData;
   performance?: Performance;
+  codeInjection?: CodeInjection;
   readTime: number;
   authorName?: string;
   publishedAt?: string | null;
@@ -240,6 +255,9 @@ function invalidatePageRelated(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['pages'] });
   qc.invalidateQueries({ queryKey: ['stats'] });
   qc.invalidateQueries({ queryKey: ['sitemap'] });
+  // A page save can auto-create a 301 (slug change) or auto-remove a shadowing
+  // redirect (new page at a redirected URL), so the Redirects list may be stale.
+  qc.invalidateQueries({ queryKey: ['redirects'] });
 }
 
 export function useCreatePage() {
@@ -309,6 +327,9 @@ function invalidatePostRelated(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['categories'] });
   qc.invalidateQueries({ queryKey: ['stats'] });
   qc.invalidateQueries({ queryKey: ['sitemap'] });
+  // A post save can auto-create a 301 (slug change) or auto-remove a shadowing
+  // redirect (new post at a redirected URL), so the Redirects list may be stale.
+  qc.invalidateQueries({ queryKey: ['redirects'] });
 }
 
 export function useCreatePost() {

@@ -252,6 +252,8 @@ const PUBLIC_SETTING_KEYS = new Set([
   'organization',
   'analytics',
   'robots',
+  // Site-wide default header/body/footer code injection (see SEO settings).
+  'codeInjection',
 ]);
 
 publicRoutes.get(

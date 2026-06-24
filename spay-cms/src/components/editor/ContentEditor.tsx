@@ -171,18 +171,22 @@ export function ContentEditor({ kind }: { kind: Kind }) {
     return t ? t.split(/\s+/).length : 0;
   }, [draft.content]);
 
+  // Built-in pages are identified by their SAVED slug (remote.slug), never by the
+  // value being typed in the URL field. Otherwise editing a normal page's slug —
+  // e.g. backspacing it down to "/" — would momentarily match a reserved slug and
+  // wrongly flip the page into read-only "built-in" mode (trapping the input).
+  const savedSlug = kind === 'page' ? remote?.slug : undefined;
   // Reserved (code-driven) pages — editor body is read-only / hidden.
-  const isReservedPage =
-    kind === 'page' && !!draft.slug && RESERVED_PAGE_SLUGS.has(draft.slug);
+  const isReservedPage = !!savedSlug && RESERVED_PAGE_SLUGS.has(savedSlug);
   // The home / landing page — supports an in-CMS live preview of the website.
-  const isHomePage = kind === 'page' && draft.slug === '/';
+  const isHomePage = savedSlug === '/';
   // Pages whose text content is CMS-editable via `sections`.
-  const isAboutPage = kind === 'page' && draft.slug === '/about';
-  const isSupportPage = kind === 'page' && draft.slug === '/support';
-  const isProhibitedPage = kind === 'page' && draft.slug === '/prohibited-activities';
-  const isPrivacyPage = kind === 'page' && draft.slug === '/privacy-policy';
-  const isEsignPage = kind === 'page' && draft.slug === '/e-sign-consent';
-  const isCardTermsPage = kind === 'page' && draft.slug === '/card-terms';
+  const isAboutPage = savedSlug === '/about';
+  const isSupportPage = savedSlug === '/support';
+  const isProhibitedPage = savedSlug === '/prohibited-activities';
+  const isPrivacyPage = savedSlug === '/privacy-policy';
+  const isEsignPage = savedSlug === '/e-sign-consent';
+  const isCardTermsPage = savedSlug === '/card-terms';
   // Pages whose text content is editable from the CMS (Content tab + streamed
   // live preview).
   const hasEditableSections =
@@ -242,8 +246,8 @@ export function ContentEditor({ kind }: { kind: Kind }) {
     // Strip _id/timestamps/category-object/etc that come from server data.
     const base = { ...draft, ...overrides, title: finalTitle, slug: finalSlug };
     const payload: any = kind === 'page'
-      ? pickFields(base, ['title', 'slug', 'status', 'template', 'content', 'sections', 'excerpt', 'seo', 'schema', 'performance', 'featuredImage', 'scheduledAt'])
-      : pickFields(base, ['title', 'slug', 'status', 'excerpt', 'content', 'cover', 'coverMedia', 'category', 'tags', 'readTime', 'seo', 'schema', 'performance', 'scheduledAt']);
+      ? pickFields(base, ['title', 'slug', 'status', 'template', 'content', 'sections', 'excerpt', 'seo', 'schema', 'performance', 'codeInjection', 'featuredImage', 'scheduledAt'])
+      : pickFields(base, ['title', 'slug', 'status', 'excerpt', 'content', 'cover', 'coverMedia', 'category', 'tags', 'readTime', 'seo', 'schema', 'performance', 'codeInjection', 'scheduledAt']);
 
     // Coerce populated refs (category / featuredImage / coverMedia) down to id strings
     if (kind === 'post' && payload.category && typeof payload.category === 'object') {
@@ -468,49 +472,63 @@ export function ContentEditor({ kind }: { kind: Kind }) {
                 className="w-full bg-transparent font-display font-bold text-2xl sm:text-3xl lg:text-[32px] tracking-[-0.025em] text-fg-1 placeholder:text-fg-4 outline-none border-0 leading-tight mb-2"
                 placeholder="Untitled"
               />
-              <div className="flex items-center gap-2 mb-4 text-fg-3 text-sm flex-wrap">
-                <span className="text-fg-4">{kind === 'page' ? 'spay.finance' : 'spay.finance/blog/'}</span>
-                <input
-                  value={draft.slug ?? ''}
-                  onChange={(e) => {
-                    setSlugTouched(true);
-                    update({ slug: e.target.value });
-                  }}
-                  placeholder={kind === 'page' ? '/slug' : 'slug'}
-                  readOnly={isReservedPage}
-                  title={isReservedPage ? 'Reserved page — slug is locked' : undefined}
-                  className={cn(
-                    'bg-transparent font-mono text-sm outline-none border-b border-dashed transition-colors min-w-[120px]',
-                    isReservedPage
-                      ? 'text-fg-3 border-line cursor-not-allowed'
-                      : 'text-fg-2 border-line focus:border-cyan-300/40'
+              <div className="mb-4 space-y-1.5">
+                <div className="flex items-center gap-2 text-sm flex-wrap">
+                  <span className="text-[10px] uppercase tracking-[0.14em] text-fg-4 font-semibold">URL</span>
+                  <span className="text-fg-4 font-mono text-sm">{kind === 'page' ? 'spay.finance' : 'spay.finance/blog/'}</span>
+                  <input
+                    value={draft.slug ?? ''}
+                    onChange={(e) => {
+                      setSlugTouched(true);
+                      update({ slug: e.target.value });
+                    }}
+                    placeholder={kind === 'page' ? '/slug' : 'slug'}
+                    readOnly={isReservedPage}
+                    title={isReservedPage ? 'Reserved page — slug is locked' : 'Edit the URL slug'}
+                    className={cn(
+                      'font-mono text-sm rounded-spay-sm px-2 py-1 min-w-[160px] outline-none transition-colors',
+                      isReservedPage
+                        ? 'text-fg-3 bg-surface/40 border border-line cursor-not-allowed'
+                        : 'text-fg-1 bg-surface-raised border border-line hover:border-line-strong focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/15'
+                    )}
+                  />
+                  {!isReservedPage && draft.title && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const baseSlug = slugify(draft.title ?? '');
+                            const newSlug = kind === 'page' && baseSlug ? '/' + baseSlug : baseSlug;
+                            update({ slug: newSlug });
+                            setSlugTouched(false);
+                          }}
+                          className="inline-flex items-center justify-center size-7 rounded-spay-sm text-fg-4 hover:text-cyan-300 hover:bg-cyan-300/[0.06] transition-colors"
+                          aria-label="Regenerate slug from title"
+                        >
+                          <Wand2 className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Regenerate slug from title</TooltipContent>
+                    </Tooltip>
                   )}
-                />
-                {!isReservedPage && draft.title && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const baseSlug = slugify(draft.title ?? '');
-                          const newSlug = kind === 'page' && baseSlug ? '/' + baseSlug : baseSlug;
-                          update({ slug: newSlug });
-                          setSlugTouched(false);
-                        }}
-                        className="inline-flex items-center justify-center size-6 rounded-spay-sm text-fg-4 hover:text-cyan-300 hover:bg-cyan-300/[0.06] transition-colors"
-                        aria-label="Regenerate slug from title"
-                      >
-                        <Wand2 className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Regenerate slug from title</TooltipContent>
-                  </Tooltip>
-                )}
-                {!isReservedPage && isNew && !slugTouched && (
-                  <span className="text-[10px] uppercase tracking-[0.14em] text-cyan-300/70 ml-1">auto</span>
+                  {!isReservedPage && isNew && !slugTouched && (
+                    <span className="text-[10px] uppercase tracking-[0.14em] text-cyan-300/70">auto</span>
+                  )}
+                  {isReservedPage && (
+                    <span className="text-[10px] uppercase tracking-[0.14em] text-fg-4">locked</span>
+                  )}
+                </div>
+                {/* Editing an existing page's URL: reassure that old links won't break. */}
+                {!isReservedPage && !isNew && (
+                  <p className="text-[11px] text-fg-4 leading-relaxed">
+                    Edit the URL to rename this {kind}. Saving automatically adds a 301 redirect from the old URL, so existing links keep working.
+                  </p>
                 )}
                 {isReservedPage && (
-                  <span className="text-[10px] uppercase tracking-[0.14em] text-fg-4 ml-1">locked</span>
+                  <p className="text-[11px] text-fg-4 leading-relaxed">
+                    This is a built-in page — its URL is fixed and can&apos;t be changed.
+                  </p>
                 )}
               </div>
               {kind === 'post' && (
@@ -621,6 +639,8 @@ export function ContentEditor({ kind }: { kind: Kind }) {
                 onSchemaChange={(schema) => update({ schema } as any)}
                 performance={(draft as any).performance ?? null}
                 onPerformanceChange={(performance) => update({ performance } as any)}
+                codeInjection={(draft as any).codeInjection ?? null}
+                onCodeInjectionChange={(codeInjection) => update({ codeInjection } as any)}
                 kind={kind}
                 editor={editor}
                 entityId={id && id !== 'new' ? id : undefined}

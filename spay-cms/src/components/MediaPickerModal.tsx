@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, X, Image as ImageIcon, CheckCircle2 } from 'lucide-react';
+import { Search, X, Image as ImageIcon, CheckCircle2, UploadCloud, Loader2 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/Dialog';
@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useMedia, type MediaItem } from '@/lib/queries';
+import { useMedia, useUploadMedia, type MediaItem } from '@/lib/queries';
+import { useToast } from '@/components/ui/Toaster';
+import { apiErrorMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 /**
@@ -56,6 +58,43 @@ export function MediaPickerModal(props: Props) {
   );
 
   const { data = [], isLoading, refetch } = useMedia(filter);
+  const upload = useUploadMedia();
+  const { toast } = useToast();
+
+  // Drag-and-drop upload straight into the picker. dragDepth avoids overlay
+  // flicker as the cursor crosses inner elements.
+  const [dragging, setDragging] = React.useState(false);
+  const dragDepth = React.useRef(0);
+
+  const handleDropFiles = async (files: FileList | File[]) => {
+    const all = Array.from(files ?? []);
+    const picks = accept === 'image' ? all.filter((f) => f.type.startsWith('image/')) : all;
+    if (!picks.length) {
+      toast({ title: 'Drop an image file', variant: 'warning' });
+      return;
+    }
+    try {
+      const items = await upload.mutateAsync(picks);
+      await refetch();
+      // Auto-select what was just uploaded so the user can confirm immediately.
+      if (multiple) {
+        setPickedMany((cur) => [...cur, ...items]);
+      } else if (items[0]) {
+        setPicked(items[0]);
+      }
+      toast({ title: `Uploaded ${items.length} file${items.length === 1 ? '' : 's'}`, variant: 'success' });
+    } catch (err) {
+      toast({ title: 'Upload failed', description: apiErrorMessage(err), variant: 'danger' });
+    }
+  };
+
+  const hasFiles = (e: React.DragEvent) => e.dataTransfer?.types?.includes('Files');
+  const dropHandlers = {
+    onDragEnter: (e: React.DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current += 1; setDragging(true); },
+    onDragOver: (e: React.DragEvent) => { if (hasFiles(e)) e.preventDefault(); },
+    onDragLeave: (e: React.DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } },
+    onDrop: (e: React.DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current = 0; setDragging(false); void handleDropFiles(e.dataTransfer?.files); },
+  };
 
   // Reset selection when reopened, and always pull the freshest library so
   // images uploaded since the editor loaded (e.g. in the Media Library tab)
@@ -94,15 +133,21 @@ export function MediaPickerModal(props: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]">
+      <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]" {...dropHandlers}>
+        {(dragging || upload.isPending) && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-2 rounded-spay-lg border-2 border-dashed border-cyan-300/60 bg-surface-deepest/85 backdrop-blur-sm pointer-events-none">
+            {upload.isPending ? <Loader2 className="size-8 animate-spin text-cyan-300" /> : <UploadCloud className="size-8 text-cyan-300" />}
+            <p className="text-sm font-semibold text-cyan-300">{upload.isPending ? 'Uploading…' : 'Drop image to upload'}</p>
+          </div>
+        )}
         <DialogHeader className="px-6 pt-6 shrink-0">
           <DialogTitle>
             {multiple ? 'Pick images for the gallery' : 'Pick from media library'}
           </DialogTitle>
           <DialogDescription>
             {multiple
-              ? `Click each image to select. Pick ${minPick}–${maxPick} files.`
-              : 'Choose an existing file from your media library.'}
+              ? `Click each image to select, or drag images in to upload. Pick ${minPick}–${maxPick} files.`
+              : 'Choose an existing file, or drag an image in to upload.'}
           </DialogDescription>
         </DialogHeader>
 

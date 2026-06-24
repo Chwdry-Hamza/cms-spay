@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Globe, Sparkles, Facebook, Save, RotateCcw, Loader2, Search, Filter, Tag, X, Plus } from 'lucide-react';
+import { Globe, Sparkles, Facebook, Save, RotateCcw, Loader2, Search, Filter, Tag, X, Plus, Code2 } from 'lucide-react';
 // (Filter still used by the "Noindex filtered URLs" toggle icon)
 import { PageContainer, PageHeader } from '@/components/layout/AppShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -50,15 +50,32 @@ const DEFAULT_CRAWL: CrawlSettings = {
   noindexFiltered: true,
 };
 
+/** Site-wide default code injection — applied to EVERY page, on top of any
+ *  per-page snippets set in the page/post editor. */
+type GlobalCodeInjection = {
+  header: string;
+  body: string;
+  footer: string;
+};
+
+const DEFAULT_CODE: GlobalCodeInjection = {
+  header: '',
+  body: '',
+  footer: '',
+};
+
 export default function SEOSettingsPage() {
   const { data, isLoading } = useSetting<SiteSEO>('seo');
   const { data: crawlData } = useSetting<CrawlSettings>('crawl');
+  const { data: codeData } = useSetting<GlobalCodeInjection>('codeInjection');
   const update = useUpdateSetting();
   const { toast } = useToast();
   const [draft, setDraft] = React.useState<SiteSEO>(DEFAULT);
   const [crawlDraft, setCrawlDraft] = React.useState<CrawlSettings>(DEFAULT_CRAWL);
+  const [codeDraft, setCodeDraft] = React.useState<GlobalCodeInjection>(DEFAULT_CODE);
   const [dirty, setDirty] = React.useState(false);
   const [crawlDirty, setCrawlDirty] = React.useState(false);
+  const [codeDirty, setCodeDirty] = React.useState(false);
 
   // Organization state is owned by OrganizationCard; it exposes its current
   // value via a ref + signals dirty via a callback. This keeps that editor
@@ -80,6 +97,13 @@ export default function SEOSettingsPage() {
     }
   }, [crawlData]);
 
+  React.useEffect(() => {
+    if (codeData) {
+      setCodeDraft({ ...DEFAULT_CODE, ...codeData });
+      setCodeDirty(false);
+    }
+  }, [codeData]);
+
   const set = (k: keyof SiteSEO, v: any) => {
     setDraft((d) => ({ ...d, [k]: v }));
     setDirty(true);
@@ -90,11 +114,17 @@ export default function SEOSettingsPage() {
     setCrawlDirty(true);
   };
 
+  const setCode = (k: keyof GlobalCodeInjection, v: string) => {
+    setCodeDraft((d) => ({ ...d, [k]: v }));
+    setCodeDirty(true);
+  };
+
   const save = async () => {
     try {
       const tasks: Promise<unknown>[] = [];
       if (dirty)      tasks.push(update.mutateAsync({ key: 'seo',   value: draft }));
       if (crawlDirty) tasks.push(update.mutateAsync({ key: 'crawl', value: crawlDraft }));
+      if (codeDirty)  tasks.push(update.mutateAsync({ key: 'codeInjection', value: codeDraft }));
       if (orgDirty && orgRef.current) {
         tasks.push(update.mutateAsync({ key: 'organization', value: orgRef.current }));
       }
@@ -102,6 +132,7 @@ export default function SEOSettingsPage() {
       await Promise.all(tasks);
       setDirty(false);
       setCrawlDirty(false);
+      setCodeDirty(false);
       setOrgDirty(false);
       toast({ title: 'SEO settings saved', variant: 'success' });
     } catch (err) {
@@ -109,7 +140,7 @@ export default function SEOSettingsPage() {
     }
   };
 
-  const anyDirty = dirty || crawlDirty || orgDirty;
+  const anyDirty = dirty || crawlDirty || codeDirty || orgDirty;
 
   return (
     <PageContainer>
@@ -123,8 +154,10 @@ export default function SEOSettingsPage() {
               onClick={() => {
                 setDraft({ ...DEFAULT, ...(data ?? {}) });
                 setCrawlDraft({ ...DEFAULT_CRAWL, ...(crawlData ?? {}) });
+                setCodeDraft({ ...DEFAULT_CODE, ...(codeData ?? {}) });
                 setDirty(false);
                 setCrawlDirty(false);
+                setCodeDirty(false);
               }}
               disabled={!anyDirty}
             >
@@ -146,6 +179,7 @@ export default function SEOSettingsPage() {
             <TabsTrigger value="general"><Globe className="size-3.5" />General</TabsTrigger>
             <TabsTrigger value="social"><Facebook className="size-3.5" />Social</TabsTrigger>
             <TabsTrigger value="schema"><Sparkles className="size-3.5" />Schema</TabsTrigger>
+            <TabsTrigger value="code"><Code2 className="size-3.5" />Code</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4">
@@ -209,6 +243,43 @@ export default function SEOSettingsPage() {
           <TabsContent value="schema" className="space-y-4">
             <OrganizationCard onDirtyChange={setOrgDirty} pendingRef={orgRef} />
           </TabsContent>
+
+          <TabsContent value="code" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Site-wide code injection</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <p className="text-[12px] text-fg-3 leading-relaxed">
+                  Applied to <span className="text-fg-1 font-medium">every page</span> of the
+                  site, in addition to any per-page snippets set in the page/post editor.
+                  Use for global tags — analytics, pixels, chat widgets, verification.
+                  Rendered verbatim and not sanitized, so only add code you trust.
+                </p>
+                <GlobalCodeField
+                  label="Header"
+                  hint="Injected into <head> on every page (analytics, pixels, verification meta)."
+                  value={codeDraft.header}
+                  onChange={(v) => setCode('header', v)}
+                  placeholder={'<!-- e.g. <script src="https://www.googletagmanager.com/gtag/js?id=G-XXXX"></script> -->'}
+                />
+                <GlobalCodeField
+                  label="Body"
+                  hint="Injected at the top of <body> on every page (widgets, banners)."
+                  value={codeDraft.body}
+                  onChange={(v) => setCode('body', v)}
+                  placeholder={'<!-- e.g. GTM <noscript> fallback -->'}
+                />
+                <GlobalCodeField
+                  label="Footer"
+                  hint="Injected at the end of <body> on every page (deferred scripts, chat)."
+                  value={codeDraft.footer}
+                  onChange={(v) => setCode('footer', v)}
+                  placeholder={'<!-- e.g. live-chat or deferred analytics -->'}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       )}
     </PageContainer>
@@ -222,6 +293,41 @@ function Field({ label, children }: { label: string; hint?: string; children: Re
         <Label>{label}</Label>
       </div>
       <div>{children}</div>
+    </div>
+  );
+}
+
+function GlobalCodeField({
+  label, hint, value, onChange, placeholder,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="flex items-center gap-1.5">
+          <Code2 className="size-3.5 text-fg-4" />
+          {label}
+        </Label>
+        {value.trim() && (
+          <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-300">set</span>
+        )}
+      </div>
+      <div className="rounded-spay-md border border-line bg-surface-deepest overflow-hidden">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck={false}
+          rows={6}
+          placeholder={placeholder}
+          className="w-full p-3 bg-transparent font-mono text-[11px] text-fg-1 placeholder:text-fg-4 outline-none resize-y leading-relaxed"
+        />
+      </div>
+      <p className="text-[10px] text-fg-4 leading-relaxed">{hint}</p>
     </div>
   );
 }
