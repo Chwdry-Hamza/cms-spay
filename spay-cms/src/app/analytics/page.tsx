@@ -75,8 +75,11 @@ export default function AnalyticsPage() {
     setDirty(true);
   };
 
+  // Search Console offers the verification as a full meta tag — accept either
+  // that tag or the bare token by extracting the content value.
   const setVerif = (k: keyof SeoVerification, v: string) => {
-    setVerifDraft((d) => ({ ...d, [k]: v }));
+    const token = v.match(/content=["']([^"']+)["']/i)?.[1] ?? v;
+    setVerifDraft((d) => ({ ...d, [k]: token }));
     setVerifDirty(true);
   };
 
@@ -186,7 +189,7 @@ export default function AnalyticsPage() {
                     className="mt-1.5 font-mono"
                     value={verifDraft.searchConsoleVerification}
                     onChange={(e) => setVerif('searchConsoleVerification', e.target.value)}
-                    placeholder="Just the content value, e.g. abc123…"
+                    placeholder="Token or full <meta> tag, e.g. abc123…"
                   />
                 </div>
               </CardContent>

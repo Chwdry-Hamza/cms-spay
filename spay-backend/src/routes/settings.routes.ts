@@ -36,8 +36,10 @@ settingRoutes.put(
       { $set: { value: req.body } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    // settings often affect every page (SEO defaults, analytics scripts)
-    triggerRevalidate('/');
+    // Settings affect every page (SEO defaults, analytics scripts, code
+    // injection render in the root layout) — purge the whole layout scope,
+    // not just the homepage.
+    triggerRevalidate('layout:/');
     res.json(doc.value);
   })
 );
