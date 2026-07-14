@@ -21,7 +21,7 @@ function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { login, user, ready } = useAuth();
-  const [email, setEmail] = React.useState('admin@spay.finance');
+  const [email, setEmail] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -77,6 +77,7 @@ function LoginInner() {
               id="email"
               type="email"
               autoComplete="email"
+              placeholder="you@example.com"
               className="mt-1.5"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
